@@ -182,20 +182,46 @@ void draw5x8Sprite(int16_t x, int16_t y, const uint8_t sprite[8], uint8_t color 
 }
 
 // =============================================================================
-// GAME 1: PING PONG (Arcade Segmented Physics & Dynamic AI)
 // =============================================================================
+// GAME 1: PING PONG (Normal Match vs CPU & Inverted Survival Dodge Mode)
+// =============================================================================
+enum PingPongMode {
+    PP_MODE_SUBMENU = 0,
+    PP_MODE_NORMAL,
+    PP_MODE_DODGE
+};
+
 struct PingPongGame {
+    PingPongMode mode;
+    int8_t submenuCursor;
+
+    // Shared & Normal Mode Variables
     float p1Y, p2Y;
     float bx, by;
     float bvx, bvy;
     float ballSpeed;
     uint8_t s1, s2;
-    uint16_t highScore;
+    uint16_t highScore; // Normal Mode High Score (EEPROM addr 14)
     uint8_t rallyCount;
     bool gameOver;
     bool victory;
 
+    // Dodge Mode Variables
+    uint16_t dodgeScore;
+    uint16_t highScoreDodge; // Dodge Mode High Score (EEPROM addr 24)
+    bool dodgeGameOver;
+    bool isNewRecord;
+    float targetCpuY;
+    uint8_t launchCooldown;
+
     void init() {
+        melodyPlayer.stop();
+        mode = PP_MODE_SUBMENU;
+        submenuCursor = 0;
+    }
+
+    void initNormal() {
+        mode = PP_MODE_NORMAL;
         melodyPlayer.stop();
         p1Y = 24.0f;
         p2Y = 24.0f;
@@ -206,20 +232,115 @@ struct PingPongGame {
         if (highScore == 0xFFFF) highScore = 0;
         gameOver = false;
         victory = false;
-        serve(1);
+        serveNormal(1);
     }
 
-    void serve(int8_t dir) {
+    void serveNormal(int8_t dir) {
         bx = 64.0f;
         by = 34.0f;
         ballSpeed = 1.8f;
         rallyCount = 0;
-        float angle = ((random(0, 100) / 100.0f) * 0.6f) - 0.3f; // Slight initial angle
+        float angle = ((random(0, 100) / 100.0f) * 0.6f) - 0.3f;
         bvx = dir * ballSpeed * cos(angle);
         bvy = ballSpeed * sin(angle);
     }
 
-    void update() {
+    void initDodge() {
+        mode = PP_MODE_DODGE;
+        melodyPlayer.stop();
+        p1Y = 24.0f;
+        p2Y = 24.0f;
+        targetCpuY = 24.0f;
+        dodgeScore = 0;
+        highScoreDodge = 0;
+        EEPROM.get(24, highScoreDodge);
+        if (highScoreDodge == 0xFFFF) highScoreDodge = 0;
+        dodgeGameOver = false;
+        isNewRecord = false;
+        launchCooldown = 0;
+        serveDodge();
+    }
+
+    void serveDodge() {
+        // Difficulty curve: Base speed increases slightly every 3 dodges
+        float baseSpd = 2.0f + (dodgeScore / 3) * 0.22f;
+        if (baseSpd > 4.6f) baseSpd = 4.6f;
+
+        // CPU selects a new launcher position
+        targetCpuY = 11.0f + (float)random(0, 36);
+        p2Y = targetCpuY;
+
+        bx = 118.0f;
+        by = p2Y + 6.5f;
+
+        // Aim towards player side with varied trajectories and wall bounces
+        float targetY = 10.0f + (float)random(0, 51);
+        float dy = targetY - by;
+        float dx = -118.0f;
+        float dist = sqrt(dx * dx + dy * dy);
+        if (dist < 1.0f) dist = 1.0f;
+
+        bvx = (dx / dist) * baseSpd;
+        bvy = (dy / dist) * baseSpd;
+    }
+
+    void updateSubmenu() {
+        if (arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(UP_BUTTON)) {
+            sound.tone(880, 15);
+            submenuCursor--;
+            if (submenuCursor < 0) submenuCursor = 1;
+        }
+        if (arduboy.justPressed(RIGHT_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+            sound.tone(700, 15);
+            submenuCursor++;
+            if (submenuCursor > 1) submenuCursor = 0;
+        }
+        if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) {
+            sound.tone(1760, 40);
+            if (submenuCursor == 0) {
+                initNormal();
+            } else {
+                initDodge();
+            }
+        }
+    }
+
+    void drawSubmenu() {
+        // Header
+        arduboy.fillRect(0, 0, 128, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+        arduboy.setCursor(36, 1);
+        arduboy.print("PING PONG");
+        arduboy.setTextColor(WHITE);
+
+        const char* ppItems[2] = {
+            "1. Modo Normal",
+            "2. Modo Invertido"
+        };
+
+        for (uint8_t i = 0; i < 2; i++) {
+            int16_t y = 20 + (i * 14);
+            if (i == submenuCursor) {
+                arduboy.fillRect(8, y - 2, 112, 11, WHITE);
+                arduboy.setTextColor(BLACK);
+                arduboy.setCursor(12, y);
+                arduboy.print("> ");
+                arduboy.print(ppItems[i]);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.setCursor(12, y);
+                arduboy.print("  ");
+                arduboy.print(ppItems[i]);
+            }
+        }
+
+        // Bottom Navigation Bar
+        arduboy.drawFastHLine(0, 54, 128, WHITE);
+        arduboy.setCursor(2, 56);
+        arduboy.print("B1/B2:Mover  B3/B4:OK");
+    }
+
+    void updateNormal() {
         if (gameOver || victory) {
             if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) ||
                 arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(RIGHT_BUTTON) ||
@@ -235,13 +356,11 @@ struct PingPongGame {
 
         // --- CPU AI with Human-like Inertia & Error Margin ---
         if (bvx > 0.0f) {
-            // Target with slight human tremor offset
             float targetY = by - 8.0f + (sin(millis() * 0.008f) * 3.5f);
             float maxCpuSpeed = min(2.4f, 1.2f + ballSpeed * 0.22f);
             if (p2Y < targetY - 1.5f) p2Y += min(maxCpuSpeed, targetY - p2Y);
             else if (p2Y > targetY + 1.5f) p2Y -= min(maxCpuSpeed, p2Y - targetY);
         } else {
-            // Return to center when ball is away
             if (p2Y < 24.0f) p2Y += 0.6f;
             else if (p2Y > 24.0f) p2Y -= 0.6f;
         }
@@ -252,7 +371,7 @@ struct PingPongGame {
         bx += bvx;
         by += bvy;
 
-        // Top / Bottom Wall Bounce (Under top scoreboard at y=10)
+        // Top / Bottom Wall Bounce
         if (by <= 10.0f) {
             by = 10.0f;
             bvy = fabs(bvy);
@@ -267,27 +386,22 @@ struct PingPongGame {
         if (bx <= 6.0f && bx >= 2.0f && by + 3.0f >= p1Y && by <= p1Y + 16.0f && bvx < 0.0f) {
             bx = 7.0f;
             rallyCount++;
-            ballSpeed = min(4.6f, ballSpeed * 1.05f); // +5% speed increment per volley
+            ballSpeed = min(4.6f, ballSpeed * 1.05f);
 
-            float relY = (by + 1.5f) - (p1Y + 8.0f); // Range approx -8.0 to +8.0
+            float relY = (by + 1.5f) - (p1Y + 8.0f);
             if (relY <= -4.8f) {
-                // Segment 1: Top Edge (60° Upward)
                 bvx = ballSpeed * 0.50f;
                 bvy = -ballSpeed * 0.866f;
             } else if (relY <= -1.6f) {
-                // Segment 2: Upper Mid (30° Upward)
                 bvx = ballSpeed * 0.866f;
                 bvy = -ballSpeed * 0.50f;
             } else if (relY <= 1.6f) {
-                // Segment 3: Center (Flat 0°)
                 bvx = ballSpeed * 0.98f;
                 bvy = relY * 0.12f;
             } else if (relY <= 4.8f) {
-                // Segment 4: Lower Mid (30° Downward)
                 bvx = ballSpeed * 0.866f;
                 bvy = ballSpeed * 0.50f;
             } else {
-                // Segment 5: Bottom Edge (60° Downward)
                 bvx = ballSpeed * 0.50f;
                 bvy = ballSpeed * 0.866f;
             }
@@ -329,7 +443,7 @@ struct PingPongGame {
                 melodyPlayer.play(pingPongDefeatNotes, 4);
             } else {
                 sound.tone(220, 80);
-                serve(1);
+                serveNormal(1);
             }
         } else if (bx > 132.0f) {
             s1++;
@@ -340,21 +454,21 @@ struct PingPongGame {
                 melodyPlayer.play(pingPongVictoryNotes, 4);
             } else {
                 sound.tone(1400, 80);
-                serve(-1);
+                serveNormal(-1);
             }
         }
     }
 
-    void draw() {
+    void drawNormal() {
         // Top Scoreboard (Player vs CPU)
         arduboy.setCursor(20, 1); arduboy.print("YOU: "); arduboy.print(s1);
         arduboy.setCursor(76, 1); arduboy.print("CPU: "); arduboy.print(s2);
         arduboy.drawFastHLine(0, 9, 128, WHITE);
 
-        // Court Net (Dashed line starting below scoreboard)
+        // Court Net
         for (uint8_t y = 11; y < 64; y += 6) arduboy.drawFastVLine(63, y, 3, WHITE);
 
-        // Paddles (Segmented outline style)
+        // Paddles
         arduboy.fillRect(3, (int16_t)p1Y, 3, 16, WHITE);
         arduboy.fillRect(122, (int16_t)p2Y, 3, 16, WHITE);
 
@@ -371,6 +485,146 @@ struct PingPongGame {
             arduboy.drawRect(18, 18, 92, 28, WHITE);
             arduboy.setCursor(40, 23); arduboy.print("YOU WIN!");
             arduboy.setCursor(24, 34); arduboy.print("Press Any Key");
+        }
+    }
+
+    void updateDodge() {
+        if (dodgeGameOver) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) ||
+                arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(RIGHT_BUTTON) ||
+                arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+                init(); // Return to Ping Pong submenu
+            }
+            return;
+        }
+
+        // Player Controls (B1: Up, B2: Down)
+        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && p1Y > 11.0f) p1Y -= 2.6f;
+        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && p1Y < 46.0f) p1Y += 2.6f;
+
+        // Launch Cooldown (CPU prepares next launch)
+        if (launchCooldown > 0) {
+            launchCooldown--;
+            if (p2Y < targetCpuY - 1.0f) p2Y += min(3.0f, targetCpuY - p2Y);
+            else if (p2Y > targetCpuY + 1.0f) p2Y -= min(3.0f, p2Y - targetCpuY);
+            if (launchCooldown == 0) {
+                serveDodge();
+            }
+            return;
+        }
+
+        // Move Ball
+        bx += bvx;
+        by += bvy;
+
+        // Top / Bottom Wall Bounce
+        if (by <= 10.0f) {
+            by = 10.0f;
+            bvy = fabs(bvy);
+            sound.tone(450, 12);
+        } else if (by >= 60.0f) {
+            by = 60.0f;
+            bvy = -fabs(bvy);
+            sound.tone(450, 12);
+        }
+
+        // --- Colisión / Game Over: Si la pelota choca con la pala del jugador ---
+        if (bx <= 6.0f && bx >= 2.0f && by + 3.0f >= p1Y && by <= p1Y + 16.0f) {
+            dodgeGameOver = true;
+            sound.tone(180, 120);
+
+            if (dodgeScore > highScoreDodge) {
+                highScoreDodge = dodgeScore;
+                EEPROM.put(24, highScoreDodge);
+                isNewRecord = true;
+                triggerRgbLed(0, 255, 0, 1000); // 1s Green LED on personal record
+                melodyPlayer.play(pingPongVictoryNotes, 4);
+            }
+            return;
+        }
+
+        // --- Punto ganado (+1 Score): Si la pelota rebasa la línea de fondo del jugador ---
+        if (bx < -4.0f) {
+            dodgeScore++;
+            sound.tone(1300, 30); // Short bip
+            launchCooldown = 15;  // Pause before next launch
+            targetCpuY = 11.0f + (float)random(0, 36);
+            bx = 120.0f;
+            by = targetCpuY + 6.5f;
+            bvx = 0;
+            bvy = 0;
+        }
+    }
+
+    void drawDodge() {
+        // Top Scoreboard
+        arduboy.setCursor(4, 1); arduboy.print("ESQUIVAS: "); arduboy.print(dodgeScore);
+        arduboy.setCursor(80, 1); arduboy.print("RECORD: "); arduboy.print(highScoreDodge);
+        arduboy.drawFastHLine(0, 9, 128, WHITE);
+
+        // Court Net
+        for (uint8_t y = 11; y < 64; y += 6) arduboy.drawFastVLine(63, y, 3, WHITE);
+
+        // Player Paddle (Left)
+        arduboy.fillRect(3, (int16_t)p1Y, 3, 16, WHITE);
+
+        // CPU Launcher (Right)
+        arduboy.fillRect(122, (int16_t)p2Y, 3, 16, WHITE);
+
+        // Ball
+        if (launchCooldown == 0 && !dodgeGameOver) {
+            arduboy.fillRect((int16_t)bx, (int16_t)by, 3, 3, WHITE);
+        } else if (launchCooldown > 0) {
+            arduboy.fillRect(118, (int16_t)p2Y + 6, 3, 3, WHITE);
+        }
+
+        if (dodgeGameOver) {
+            arduboy.fillRect(14, 14, 100, 36, BLACK);
+            arduboy.drawRect(14, 14, 100, 36, WHITE);
+            arduboy.drawRect(16, 16, 96, 32, WHITE);
+
+            if (isNewRecord) {
+                arduboy.setCursor(20, 19);
+                arduboy.print("NUEVO RECORD!");
+            } else {
+                arduboy.setCursor(34, 19);
+                arduboy.print("GAME OVER");
+            }
+
+            arduboy.setCursor(24, 29);
+            arduboy.print("ESQUIVAS: ");
+            arduboy.print(dodgeScore);
+
+            arduboy.setCursor(22, 38);
+            arduboy.print("Pulsa un boton");
+        }
+    }
+
+    void update() {
+        switch (mode) {
+            case PP_MODE_SUBMENU:
+                updateSubmenu();
+                break;
+            case PP_MODE_NORMAL:
+                updateNormal();
+                break;
+            case PP_MODE_DODGE:
+                updateDodge();
+                break;
+        }
+    }
+
+    void draw() {
+        switch (mode) {
+            case PP_MODE_SUBMENU:
+                drawSubmenu();
+                break;
+            case PP_MODE_NORMAL:
+                drawNormal();
+                break;
+            case PP_MODE_DODGE:
+                drawDodge();
+                break;
         }
     }
 } pingPong;
