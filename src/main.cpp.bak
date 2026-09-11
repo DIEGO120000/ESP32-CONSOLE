@@ -1,0 +1,2475 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <esp_sleep.h>
+#include "Arduboy2.h"
+#include "ArduboyTones.h"
+
+Arduboy2 arduboy;
+ArduboyTones sound(arduboy.audio.enabled);
+
+// =============================================================================
+// GLOBAL BITMAPS & SPRITES
+// =============================================================================
+// --- Space Invaders Sprites ---
+const uint8_t PROGMEM alien_crab_1[] = {
+    8, 8,
+    0x18, 0x3C, 0x7E, 0xDB, 0xFF, 0x24, 0x5A, 0x81
+};
+const uint8_t PROGMEM alien_crab_2[] = {
+    8, 8,
+    0x18, 0x3C, 0x7E, 0xDB, 0xFF, 0x5A, 0x24, 0x42
+};
+const uint8_t PROGMEM alien_squid[] = {
+    8, 8,
+    0x18, 0x3C, 0x7E, 0xFF, 0xBD, 0xFF, 0x24, 0x42
+};
+const uint8_t PROGMEM alien_octopus[] = {
+    8, 8,
+    0x3C, 0x7E, 0xFF, 0xDB, 0xFF, 0x7E, 0x42, 0x81
+};
+const uint8_t PROGMEM player_ship_bmp[] = {
+    11, 7,
+    0x04, 0x0E, 0x0E, 0x1F, 0x7F, 0xFF, 0x7F, 0x1F, 0x0E, 0x0E, 0x04
+};
+const uint8_t PROGMEM ufo_bmp[] = {
+    12, 6,
+    0x0C, 0x1E, 0x3F, 0x7B, 0x7F, 0x7F, 0x7F, 0x7F, 0x7B, 0x3F, 0x1E, 0x0C
+};
+
+// --- 1943 Sprites ---
+const uint8_t PROGMEM plane_1943_bmp[] = {
+    11, 9,
+    0x08, 0x1C, 0x3E, 0x7F, 0xFF, 0x3E, 0x1C, 0x3E, 0x7F, 0xFF, 0x08
+};
+const uint8_t PROGMEM enemy_1943_bmp[] = {
+    9, 7,
+    0x10, 0x38, 0x7C, 0xFE, 0x38, 0xFE, 0x7C, 0x38, 0x10
+};
+const uint8_t PROGMEM bomber_1943_bmp[] = {
+    15, 9,
+    0x38, 0x7C, 0xFE, 0xFF, 0x7C, 0xFF, 0xFE, 0x7C, 0x38, 0x10, 0x38, 0x7C, 0xFE, 0x7C, 0x38
+};
+
+// --- Jump Man Sprites (5x8 Pixel Format) ---
+const uint8_t PROGMEM jm_dinoChar[8]    = { 0x04, 0x0E, 0x1F, 0x15, 0x0E, 0x04, 0x0A, 0x12 };
+const uint8_t PROGMEM jm_saltoInicio[8] = { 0x04, 0x0E, 0x1F, 0x15, 0x0E, 0x04, 0x09, 0x09 };
+const uint8_t PROGMEM jm_saltoPico[8]   = { 0x04, 0x0E, 0x1F, 0x15, 0x0E, 0x03, 0x02, 0x00 };
+const uint8_t PROGMEM jm_saltoBajada[8] = { 0x04, 0x0E, 0x1F, 0x15, 0x0E, 0x06, 0x0A, 0x02 };
+
+const uint8_t PROGMEM jm_obstaculo1[8]  = { 0x00, 0x04, 0x04, 0x15, 0x1F, 0x04, 0x04, 0x00 };
+const uint8_t PROGMEM jm_obstaculo2[8]  = { 0x00, 0x1F, 0x15, 0x1F, 0x15, 0x1F, 0x15, 0x00 };
+const uint8_t PROGMEM jm_obstaculo3[8]  = { 0x00, 0x04, 0x0E, 0x1F, 0x1F, 0x0E, 0x04, 0x00 };
+
+// Helper to draw 5x8 bitmap
+void draw5x8Sprite(int16_t x, int16_t y, const uint8_t sprite[8], uint8_t color = WHITE) {
+    for (int row = 0; row < 8; row++) {
+        uint8_t line = sprite[row];
+        for (int col = 0; col < 5; col++) {
+            if (line & (1 << (4 - col))) {
+                arduboy.drawPixel(x + col, y + row, color);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// GAME 1: PING PONG (Arcade Segmented Physics & Dynamic AI)
+// =============================================================================
+struct PingPongGame {
+    float p1Y, p2Y;
+    float bx, by;
+    float bvx, bvy;
+    float ballSpeed;
+    uint8_t s1, s2;
+    uint16_t highScore;
+    uint8_t rallyCount;
+    bool gameOver;
+    bool victory;
+
+    void init() {
+        p1Y = 24.0f;
+        p2Y = 24.0f;
+        s1 = 0;
+        s2 = 0;
+        highScore = 0;
+        EEPROM.get(14, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+        gameOver = false;
+        victory = false;
+        serve(1);
+    }
+
+    void serve(int8_t dir) {
+        bx = 64.0f;
+        by = 34.0f;
+        ballSpeed = 1.8f;
+        rallyCount = 0;
+        float angle = ((random(0, 100) / 100.0f) * 0.6f) - 0.3f; // Slight initial angle
+        bvx = dir * ballSpeed * cos(angle);
+        bvy = ballSpeed * sin(angle);
+    }
+
+    void update() {
+        if (gameOver || victory) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) ||
+                arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(RIGHT_BUTTON) ||
+                arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+                init();
+            }
+            return;
+        }
+
+        // --- Player Controls (B1: Up, B2: Down) ---
+        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && p1Y > 11.0f) p1Y -= 2.6f;
+        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && p1Y < 46.0f) p1Y += 2.6f;
+
+        // --- CPU AI with Human-like Inertia & Error Margin ---
+        if (bvx > 0.0f) {
+            // Target with slight human tremor offset
+            float targetY = by - 8.0f + (sin(millis() * 0.008f) * 3.5f);
+            float maxCpuSpeed = min(2.4f, 1.2f + ballSpeed * 0.22f);
+            if (p2Y < targetY - 1.5f) p2Y += min(maxCpuSpeed, targetY - p2Y);
+            else if (p2Y > targetY + 1.5f) p2Y -= min(maxCpuSpeed, p2Y - targetY);
+        } else {
+            // Return to center when ball is away
+            if (p2Y < 24.0f) p2Y += 0.6f;
+            else if (p2Y > 24.0f) p2Y -= 0.6f;
+        }
+        if (p2Y < 11.0f) p2Y = 11.0f;
+        if (p2Y > 46.0f) p2Y = 46.0f;
+
+        // Move Ball
+        bx += bvx;
+        by += bvy;
+
+        // Top / Bottom Wall Bounce (Under top scoreboard at y=10)
+        if (by <= 10.0f) {
+            by = 10.0f;
+            bvy = fabs(bvy);
+            sound.tone(450, 12);
+        } else if (by >= 60.0f) {
+            by = 60.0f;
+            bvy = -fabs(bvy);
+            sound.tone(450, 12);
+        }
+
+        // --- Left Paddle Segmented Collision (5 Segments) ---
+        if (bx <= 6.0f && bx >= 2.0f && by + 3.0f >= p1Y && by <= p1Y + 16.0f && bvx < 0.0f) {
+            bx = 7.0f;
+            rallyCount++;
+            ballSpeed = min(4.6f, ballSpeed * 1.05f); // +5% speed increment per volley
+
+            float relY = (by + 1.5f) - (p1Y + 8.0f); // Range approx -8.0 to +8.0
+            if (relY <= -4.8f) {
+                // Segment 1: Top Edge (60° Upward)
+                bvx = ballSpeed * 0.50f;
+                bvy = -ballSpeed * 0.866f;
+            } else if (relY <= -1.6f) {
+                // Segment 2: Upper Mid (30° Upward)
+                bvx = ballSpeed * 0.866f;
+                bvy = -ballSpeed * 0.50f;
+            } else if (relY <= 1.6f) {
+                // Segment 3: Center (Flat 0°)
+                bvx = ballSpeed * 0.98f;
+                bvy = relY * 0.12f;
+            } else if (relY <= 4.8f) {
+                // Segment 4: Lower Mid (30° Downward)
+                bvx = ballSpeed * 0.866f;
+                bvy = ballSpeed * 0.50f;
+            } else {
+                // Segment 5: Bottom Edge (60° Downward)
+                bvx = ballSpeed * 0.50f;
+                bvy = ballSpeed * 0.866f;
+            }
+            sound.tone(800 + min(600, rallyCount * 40), 18);
+        }
+
+        // --- Right Paddle Segmented Collision (CPU) ---
+        if (bx >= 119.0f && bx <= 123.0f && by + 3.0f >= p2Y && by <= p2Y + 16.0f && bvx > 0.0f) {
+            bx = 118.0f;
+            rallyCount++;
+            ballSpeed = min(4.6f, ballSpeed * 1.05f);
+
+            float relY = (by + 1.5f) - (p2Y + 8.0f);
+            if (relY <= -4.8f) {
+                bvx = -ballSpeed * 0.50f;
+                bvy = -ballSpeed * 0.866f;
+            } else if (relY <= -1.6f) {
+                bvx = -ballSpeed * 0.866f;
+                bvy = -ballSpeed * 0.50f;
+            } else if (relY <= 1.6f) {
+                bvx = -ballSpeed * 0.98f;
+                bvy = relY * 0.12f;
+            } else if (relY <= 4.8f) {
+                bvx = -ballSpeed * 0.866f;
+                bvy = ballSpeed * 0.50f;
+            } else {
+                bvx = -ballSpeed * 0.50f;
+                bvy = ballSpeed * 0.866f;
+            }
+            sound.tone(700 + min(600, rallyCount * 40), 18);
+        }
+
+        // Score Check (Match to 5 points)
+        if (bx < -4.0f) {
+            s2++;
+            sound.tone(220, 80);
+            if (s2 >= 5) gameOver = true;
+            else serve(1);
+        } else if (bx > 132.0f) {
+            s1++;
+            sound.tone(1400, 80);
+            if (s1 > highScore) { highScore = s1; EEPROM.put(14, highScore); }
+            if (s1 >= 5) victory = true;
+            else serve(-1);
+        }
+    }
+
+    void draw() {
+        // Top Scoreboard (Player vs CPU)
+        arduboy.setCursor(20, 1); arduboy.print("YOU: "); arduboy.print(s1);
+        arduboy.setCursor(76, 1); arduboy.print("CPU: "); arduboy.print(s2);
+        arduboy.drawFastHLine(0, 9, 128, WHITE);
+
+        // Court Net (Dashed line starting below scoreboard)
+        for (uint8_t y = 11; y < 64; y += 6) arduboy.drawFastVLine(63, y, 3, WHITE);
+
+        // Paddles (Segmented outline style)
+        arduboy.fillRect(3, (int16_t)p1Y, 3, 16, WHITE);
+        arduboy.fillRect(122, (int16_t)p2Y, 3, 16, WHITE);
+
+        // Ball
+        arduboy.fillRect((int16_t)bx, (int16_t)by, 3, 3, WHITE);
+
+        if (gameOver) {
+            arduboy.fillRect(18, 18, 92, 28, BLACK);
+            arduboy.drawRect(18, 18, 92, 28, WHITE);
+            arduboy.setCursor(38, 23); arduboy.print("CPU WINS!");
+            arduboy.setCursor(24, 34); arduboy.print("Press Any Key");
+        } else if (victory) {
+            arduboy.fillRect(18, 18, 92, 28, BLACK);
+            arduboy.drawRect(18, 18, 92, 28, WHITE);
+            arduboy.setCursor(40, 23); arduboy.print("YOU WIN!");
+            arduboy.setCursor(24, 34); arduboy.print("Press Any Key");
+        }
+    }
+} pingPong;
+
+// =============================================================================
+// GAME 2: ARKANOID (15 Original Rounds, 7 Power-Ups, Lasers, Multi-Ball & Warp)
+// =============================================================================
+const uint8_t PROGMEM arkanoid_levels[15][8][11] = {
+    // Round 1: Classic Color Rows (Silver top row, Blue, Green, Red)
+    {
+        {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4},
+        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+        {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 2: Inverted Pyramid with Silver Pillars
+    {
+        {4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4},
+        {4, 0, 2, 2, 2, 2, 2, 2, 2, 0, 4},
+        {4, 0, 0, 1, 1, 1, 1, 1, 0, 0, 4},
+        {4, 0, 0, 0, 3, 3, 3, 0, 0, 0, 4},
+        {4, 0, 0, 0, 0, 2, 0, 0, 0, 0, 4},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 3: Classic Space Invader
+    {
+        {0, 0, 3, 0, 0, 0, 0, 0, 3, 0, 0},
+        {0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0},
+        {0, 0, 3, 3, 3, 3, 3, 3, 3, 0, 0},
+        {0, 3, 3, 4, 3, 3, 3, 4, 3, 3, 0},
+        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+        {3, 0, 3, 3, 3, 3, 3, 3, 3, 0, 3},
+        {3, 0, 3, 0, 0, 0, 0, 0, 3, 0, 3},
+        {0, 0, 0, 2, 2, 0, 2, 2, 0, 0, 0}
+    },
+    // Round 4: Concentric Diamonds with Gold Center
+    {
+        {0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 3, 2, 3, 0, 0, 0, 0},
+        {0, 0, 0, 3, 2, 1, 2, 3, 0, 0, 0},
+        {0, 0, 3, 2, 1, 5, 1, 2, 3, 0, 0},
+        {0, 0, 0, 3, 2, 1, 2, 3, 0, 0, 0},
+        {0, 0, 0, 0, 3, 2, 3, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 5: Twin Pillars with Gold Cores
+    {
+        {3, 3, 0, 0, 4, 4, 4, 0, 0, 3, 3},
+        {3, 5, 3, 0, 4, 2, 4, 0, 3, 5, 3},
+        {3, 5, 3, 0, 4, 2, 4, 0, 3, 5, 3},
+        {3, 5, 3, 0, 4, 1, 4, 0, 3, 5, 3},
+        {3, 5, 3, 0, 4, 1, 4, 0, 3, 5, 3},
+        {3, 3, 3, 0, 4, 4, 4, 0, 3, 3, 3},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 6: Arcade Shield / Heart
+    {
+        {0, 3, 3, 0, 0, 0, 0, 0, 3, 3, 0},
+        {3, 2, 2, 3, 0, 4, 0, 3, 2, 2, 3},
+        {3, 2, 1, 2, 3, 4, 3, 2, 1, 2, 3},
+        {3, 2, 1, 1, 2, 4, 2, 1, 1, 2, 3},
+        {0, 3, 2, 1, 1, 2, 1, 1, 2, 3, 0},
+        {0, 0, 3, 2, 1, 1, 1, 2, 3, 0, 0},
+        {0, 0, 0, 3, 2, 1, 2, 3, 0, 0, 0},
+        {0, 0, 0, 0, 3, 2, 3, 0, 0, 0, 0}
+    },
+    // Round 7: Checkerboard with Silver Corners
+    {
+        {4, 0, 3, 0, 3, 0, 3, 0, 3, 0, 4},
+        {0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0},
+        {3, 0, 1, 0, 1, 0, 1, 0, 1, 0, 3},
+        {0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0},
+        {3, 0, 1, 0, 1, 0, 1, 0, 1, 0, 3},
+        {0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 0},
+        {4, 0, 3, 0, 3, 0, 3, 0, 3, 0, 4},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 8: Castle Fortress Battlement
+    {
+        {4, 4, 0, 4, 4, 0, 4, 4, 0, 4, 4},
+        {4, 4, 0, 4, 4, 0, 4, 4, 0, 4, 4},
+        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+        {2, 2, 5, 2, 2, 5, 2, 2, 5, 2, 2},
+        {1, 1, 5, 1, 1, 5, 1, 1, 5, 1, 1},
+        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 9: Zig-Zag Stairs Maze
+    {
+        {4, 3, 2, 1, 0, 0, 0, 1, 2, 3, 4},
+        {0, 4, 3, 2, 1, 0, 1, 2, 3, 4, 0},
+        {0, 0, 4, 3, 2, 5, 2, 3, 4, 0, 0},
+        {0, 0, 0, 4, 3, 2, 3, 4, 0, 0, 0},
+        {0, 0, 4, 3, 2, 5, 2, 3, 4, 0, 0},
+        {0, 4, 3, 2, 1, 0, 1, 2, 3, 4, 0},
+        {4, 3, 2, 1, 0, 0, 0, 1, 2, 3, 4},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 10: Arcade Robot Face
+    {
+        {0, 0, 4, 4, 4, 4, 4, 4, 4, 0, 0},
+        {0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0},
+        {3, 3, 5, 3, 3, 3, 3, 3, 5, 3, 3},
+        {3, 3, 5, 3, 3, 4, 3, 3, 5, 3, 3},
+        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3},
+        {0, 3, 2, 1, 1, 1, 1, 1, 2, 3, 0},
+        {0, 0, 3, 2, 2, 2, 2, 2, 3, 0, 0},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 11: Cross of Arkanoid with Silver Edges
+    {
+        {4, 0, 0, 0, 3, 3, 3, 0, 0, 0, 4},
+        {0, 4, 0, 0, 3, 2, 3, 0, 0, 4, 0},
+        {0, 0, 4, 0, 3, 1, 3, 0, 4, 0, 0},
+        {3, 3, 3, 3, 3, 5, 3, 3, 3, 3, 3},
+        {0, 0, 4, 0, 3, 1, 3, 0, 4, 0, 0},
+        {0, 4, 0, 0, 3, 2, 3, 0, 0, 4, 0},
+        {4, 0, 0, 0, 3, 3, 3, 0, 0, 0, 4},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 12: Diagonal Ribbons
+    {
+        {3, 2, 1, 0, 0, 3, 2, 1, 0, 0, 3},
+        {2, 1, 0, 0, 3, 2, 1, 0, 0, 3, 2},
+        {1, 0, 0, 3, 2, 1, 0, 0, 3, 2, 1},
+        {0, 0, 3, 2, 1, 4, 1, 2, 3, 0, 0},
+        {1, 0, 0, 3, 2, 1, 0, 0, 3, 2, 1},
+        {2, 1, 0, 0, 3, 2, 1, 0, 0, 3, 2},
+        {3, 2, 1, 0, 0, 3, 2, 1, 0, 0, 3},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 13: Hourglass
+    {
+        {4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4},
+        {0, 4, 2, 2, 2, 2, 2, 2, 2, 4, 0},
+        {0, 0, 4, 1, 1, 1, 1, 1, 4, 0, 0},
+        {0, 0, 0, 4, 5, 5, 5, 4, 0, 0, 0},
+        {0, 0, 4, 1, 1, 1, 1, 1, 4, 0, 0},
+        {0, 4, 2, 2, 2, 2, 2, 2, 2, 4, 0},
+        {4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4},
+        {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    },
+    // Round 14: Concentric Fortress Cage
+    {
+        {5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5},
+        {4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4},
+        {4, 3, 2, 2, 2, 2, 2, 2, 2, 3, 4},
+        {4, 3, 2, 1, 0, 0, 0, 1, 2, 3, 4},
+        {4, 3, 2, 1, 0, 5, 0, 1, 2, 3, 4},
+        {4, 3, 2, 2, 2, 2, 2, 2, 2, 3, 4},
+        {4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4},
+        {5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5}
+    },
+    // Round 15: Final Boss Chamber - DOH Shrine
+    {
+        {5, 5, 4, 4, 4, 4, 4, 4, 4, 5, 5},
+        {5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5},
+        {4, 3, 2, 2, 5, 5, 5, 2, 2, 3, 4},
+        {4, 3, 2, 1, 5, 4, 5, 1, 2, 3, 4},
+        {4, 3, 2, 1, 5, 4, 5, 1, 2, 3, 4},
+        {4, 3, 2, 2, 5, 5, 5, 2, 2, 3, 4},
+        {5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5},
+        {5, 5, 4, 4, 4, 4, 4, 4, 4, 5, 5}
+    }
+};
+
+struct BreakoutGame {
+    enum PowerUpType {
+        PWR_NONE = 0,
+        PWR_EXPAND,    // [E]
+        PWR_LASER,     // [L]
+        PWR_DISRUPT,   // [D]
+        PWR_CATCH,     // [C]
+        PWR_SLOW,      // [S]
+        PWR_BREAK,     // [B]
+        PWR_EXTRA_LIFE // [P]
+    };
+
+    struct Ball {
+        float x, y;
+        float vx, vy;
+        bool active;
+        bool stuck;
+        float stuckOffset;
+        uint32_t stuckTimer;
+        uint8_t bounceCount;
+    } balls[3];
+
+    struct Capsule {
+        float x, y;
+        uint8_t type;
+        bool active;
+    } capsules[3];
+
+    struct Laser {
+        float x, y;
+        bool active;
+    } lasers[4];
+
+    float paddleX;
+    float paddleWidth;
+    uint8_t activePowerUp;
+    bool warpGateOpen;
+    uint8_t laserCooldown;
+
+    uint8_t currentLevel;
+    uint8_t bricks[8][11];
+    uint8_t silverHits[8][11];
+
+    uint16_t score;
+    uint16_t highScore;
+    uint8_t lives;
+    float ballSpeed;
+    uint8_t hitsSinceSpeedUp;
+    uint32_t lastLaserAutoFire;
+
+    bool gameOver;
+    bool victory;
+    bool levelTransition;
+    uint32_t levelTransitionTimer;
+
+    void init() {
+        randomSeed(micros());
+        score = 0;
+        lives = 3;
+        gameOver = false;
+        victory = false;
+        levelTransition = false;
+
+        highScore = 0;
+        EEPROM.get(12, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+
+        uint8_t startLvl = random(0, 15);
+        loadLevel(startLvl);
+    }
+
+    void loadLevel(uint8_t lvl) {
+        currentLevel = lvl;
+        paddleWidth = 18.0f;
+        paddleX = (128.0f - paddleWidth) / 2.0f;
+        activePowerUp = PWR_NONE;
+        warpGateOpen = false;
+        laserCooldown = 0;
+        lastLaserAutoFire = millis();
+        ballSpeed = 1.4f;
+        hitsSinceSpeedUp = 0;
+
+        // Reset Lasers and Capsules
+        for (uint8_t i = 0; i < 4; i++) lasers[i].active = false;
+        for (uint8_t i = 0; i < 3; i++) capsules[i].active = false;
+
+        // Load Matrix from PROGMEM
+        for (uint8_t r = 0; r < 8; r++) {
+            for (uint8_t c = 0; c < 11; c++) {
+                bricks[r][c] = pgm_read_byte(&arkanoid_levels[lvl][r][c]);
+                silverHits[r][c] = 0;
+            }
+        }
+
+        // Spawn Main Ball (Ball 0 attached to paddle)
+        balls[0].active = true;
+        balls[0].stuck = true;
+        balls[0].stuckOffset = paddleWidth / 2.0f - 1.5f;
+        balls[0].stuckTimer = millis();
+        balls[0].bounceCount = 0;
+        balls[0].x = paddleX + balls[0].stuckOffset;
+        balls[0].y = 54.0f;
+        balls[0].vx = 1.0f;
+        balls[0].vy = -1.3f;
+
+        balls[1].active = false;
+        balls[1].bounceCount = 0;
+        balls[2].active = false;
+        balls[2].bounceCount = 0;
+
+        if (countDestructibleBricks() == 0) {
+            advanceLevel();
+            return;
+        }
+
+        levelTransition = true;
+        levelTransitionTimer = millis();
+        sound.tone(900, 40); delay(50);
+        sound.tone(1400, 80);
+    }
+
+    uint8_t countDestructibleBricks() {
+        uint8_t count = 0;
+        for (uint8_t r = 0; r < 8; r++) {
+            for (uint8_t c = 0; c < 11; c++) {
+                if (bricks[r][c] >= 1 && bricks[r][c] <= 4) count++;
+            }
+        }
+        return count;
+    }
+
+    void maybeSpawnCapsule(int16_t bx, int16_t by) {
+        if (random(0, 100) < 18) {
+            for (uint8_t i = 0; i < 3; i++) {
+                if (!capsules[i].active) {
+                    capsules[i].active = true;
+                    capsules[i].x = bx + 1.0f;
+                    capsules[i].y = by;
+                    // Random Power-Up Type: E, L, D, C, S, B, P
+                    static const uint8_t types[] = { PWR_EXPAND, PWR_LASER, PWR_DISRUPT, PWR_CATCH, PWR_SLOW, PWR_BREAK, PWR_EXTRA_LIFE };
+                    capsules[i].type = types[random(0, 7)];
+                    break;
+                }
+            }
+        }
+    }
+
+    void applyPowerUp(uint8_t type) {
+        if (type == PWR_EXTRA_LIFE) {
+            if (lives < 5) lives++;
+            sound.tone(1200, 40); delay(40); sound.tone(1800, 90);
+            return;
+        }
+
+        // Exclusive switch for modifiers
+        activePowerUp = type;
+
+        // Reset previous special states
+        if (type != PWR_EXPAND) paddleWidth = 18.0f;
+        if (type != PWR_BREAK) warpGateOpen = false;
+
+        if (type == PWR_EXPAND) {
+            paddleWidth = 28.0f;
+            if (paddleX + paddleWidth > 126.0f) paddleX = 126.0f - paddleWidth;
+            sound.tone(1100, 50);
+        } else if (type == PWR_LASER) {
+            lastLaserAutoFire = millis();
+            sound.tone(1500, 50);
+        } else if (type == PWR_DISRUPT) {
+            // Find first active ball to replicate
+            int8_t mainBall = -1;
+            for (uint8_t b = 0; b < 3; b++) {
+                if (balls[b].active) { mainBall = b; break; }
+            }
+            if (mainBall != -1) {
+                float bx = balls[mainBall].x;
+                float by = balls[mainBall].y;
+                balls[0].active = true; balls[0].x = bx; balls[0].y = by; balls[0].vx = -1.1f; balls[0].vy = -1.3f; balls[0].stuck = false; balls[0].bounceCount = 0;
+                balls[1].active = true; balls[1].x = bx; balls[1].y = by; balls[1].vx = 0.4f;  balls[1].vy = -1.6f; balls[1].stuck = false; balls[1].bounceCount = 0;
+                balls[2].active = true; balls[2].x = bx; balls[2].y = by; balls[2].vx = 1.3f;  balls[2].vy = -1.1f; balls[2].stuck = false; balls[2].bounceCount = 0;
+                sound.tone(1300, 40); delay(40); sound.tone(1600, 60);
+            }
+        } else if (type == PWR_CATCH) {
+            sound.tone(950, 50);
+        } else if (type == PWR_SLOW) {
+            ballSpeed = 1.4f;
+            for (uint8_t b = 0; b < 3; b++) {
+                if (balls[b].active && !balls[b].stuck) {
+                    float currentMag = sqrt(balls[b].vx * balls[b].vx + balls[b].vy * balls[b].vy);
+                    if (currentMag > 0.1f) {
+                        balls[b].vx = (balls[b].vx / currentMag) * ballSpeed;
+                        balls[b].vy = (balls[b].vy / currentMag) * ballSpeed;
+                    }
+                }
+            }
+            sound.tone(600, 80);
+        } else if (type == PWR_BREAK) {
+            warpGateOpen = true;
+            sound.tone(1400, 50); delay(40); sound.tone(1800, 70);
+        }
+    }
+
+    void advanceLevel() {
+        uint8_t nextLvl = random(0, 15);
+        if (nextLvl == currentLevel && 15 > 1) {
+            nextLvl = (nextLvl + 1 + random(0, 13)) % 15;
+        }
+        loadLevel(nextLvl);
+    }
+
+    void fireLasers() {
+        if (laserCooldown > 0) return;
+        uint8_t spawned = 0;
+        for (uint8_t i = 0; i < 4; i++) {
+            if (!lasers[i].active) {
+                lasers[i].active = true;
+                lasers[i].x = (spawned == 0) ? (paddleX + 1.0f) : (paddleX + paddleWidth - 2.0f);
+                lasers[i].y = 54.0f;
+                spawned++;
+                if (spawned >= 2) break;
+            }
+        }
+        if (spawned > 0) {
+            laserCooldown = 12; // ~0.2s cooldown
+            sound.tone(1500, 15);
+        }
+    }
+
+    void launchStuckBall(Ball& ball) {
+        ball.stuck = false;
+        ball.bounceCount = 0;
+        float center = paddleX + (paddleWidth / 2.0f);
+        float offset = (ball.x + 1.5f - center) / (paddleWidth / 2.0f);
+        if (offset < -0.9f) offset = -0.9f;
+        if (offset > 0.9f) offset = 0.9f;
+        ball.vx = offset * (ballSpeed * 0.85f);
+        ball.vy = -sqrt(max(0.4f, (ballSpeed * ballSpeed) - (ball.vx * ball.vx)));
+        sound.tone(800, 20);
+    }
+
+    void update() {
+        if (gameOver || victory) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) init();
+            return;
+        }
+
+        if (levelTransition) {
+            if (millis() - levelTransitionTimer > 1500 || arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) {
+                levelTransition = false;
+            }
+            return;
+        }
+
+        if (countDestructibleBricks() == 0) {
+            advanceLevel();
+            return;
+        }
+
+        if (laserCooldown > 0) laserCooldown--;
+
+        // --- Controls: Paddle Movement ---
+        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && paddleX > 2.0f) paddleX -= 2.8f;
+        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && paddleX + paddleWidth < 126.0f) paddleX += 2.8f;
+
+        // --- Automatic Laser Auto-Fire (Periodic ~380ms) ---
+        if (activePowerUp == PWR_LASER) {
+            uint32_t now = millis();
+            if (now - lastLaserAutoFire >= 380) {
+                fireLasers();
+                lastLaserAutoFire = now;
+            }
+        }
+
+        // --- Action Button (B3 / B4) (Manual Launch for Catch & Serve) ---
+        bool actionPressed = arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON);
+        if (actionPressed) {
+            for (uint8_t b = 0; b < 3; b++) {
+                if (balls[b].active && balls[b].stuck) {
+                    launchStuckBall(balls[b]);
+                }
+            }
+        }
+
+        // --- Warp Gate Trigger ---
+        if (warpGateOpen && (paddleX + paddleWidth >= 125.0f)) {
+            score += 1000;
+            advanceLevel();
+            return;
+        }
+
+        // --- Update Lasers ---
+        for (uint8_t i = 0; i < 4; i++) {
+            if (lasers[i].active) {
+                lasers[i].y -= 3.5f;
+                if (lasers[i].y < 10.0f) {
+                    lasers[i].active = false;
+                    continue;
+                }
+
+                // Laser vs Bricks
+                if (lasers[i].y <= 51.0f) {
+                    for (int8_t r = 7; r >= 0; r--) {
+                        for (int8_t c = 0; c < 11; c++) {
+                            if (bricks[r][c] > 0) {
+                                int16_t bx = 4 + c * 11;
+                                int16_t by = 12 + r * 5;
+                                if (lasers[i].x >= bx && lasers[i].x <= bx + 10 && lasers[i].y >= by && lasers[i].y <= by + 4) {
+                                    lasers[i].active = false;
+                                    if (bricks[r][c] == 5) {
+                                        sound.tone(1100, 10); // Indestructible
+                                    } else if (bricks[r][c] == 4) {
+                                        if (silverHits[r][c] == 0) {
+                                            silverHits[r][c] = 1;
+                                            sound.tone(800, 15);
+                                        } else {
+                                            bricks[r][c] = 0;
+                                            score += 100;
+                                            sound.tone(1200, 25);
+                                            maybeSpawnCapsule(bx, by);
+                                        }
+                                    } else {
+                                        uint16_t pts = (bricks[r][c] == 1) ? 50 : (bricks[r][c] == 2 ? 80 : 100);
+                                        score += pts;
+                                        bricks[r][c] = 0;
+                                        sound.tone(900 + r * 60, 20);
+                                        maybeSpawnCapsule(bx, by);
+                                    }
+
+                                    if (countDestructibleBricks() == 0) {
+                                        advanceLevel();
+                                        return;
+                                    }
+                                    goto laser_done;
+                                }
+                            }
+                        }
+                    }
+                }
+            laser_done: ;
+            }
+        }
+
+        // --- Update Falling Capsules ---
+        for (uint8_t i = 0; i < 3; i++) {
+            if (capsules[i].active) {
+                capsules[i].y += 1.0f;
+                // Check Collision with Paddle
+                if (capsules[i].y >= 55.0f && capsules[i].y <= 60.0f &&
+                    capsules[i].x + 7.0f >= paddleX && capsules[i].x <= paddleX + paddleWidth) {
+                    applyPowerUp(capsules[i].type);
+                    capsules[i].active = false;
+                } else if (capsules[i].y > 64.0f) {
+                    capsules[i].active = false;
+                }
+            }
+        }
+
+        // --- Update Active Balls ---
+        uint8_t activeBallCount = 0;
+        for (uint8_t b = 0; b < 3; b++) {
+            if (!balls[b].active) continue;
+            activeBallCount++;
+
+            if (balls[b].stuck) {
+                balls[b].x = paddleX + balls[b].stuckOffset;
+                balls[b].y = 54.0f;
+                balls[b].bounceCount = 0;
+                if (millis() - balls[b].stuckTimer > 3500) {
+                    launchStuckBall(balls[b]);
+                }
+                continue;
+            }
+
+            balls[b].x += balls[b].vx;
+            balls[b].y += balls[b].vy;
+
+            // Side Walls
+            if (balls[b].x <= 1.0f) {
+                balls[b].x = 1.0f;
+                balls[b].vx = fabs(balls[b].vx);
+                balls[b].bounceCount++;
+                sound.tone(450, 10);
+            } else if (balls[b].x >= 124.0f) {
+                balls[b].x = 124.0f;
+                balls[b].vx = -fabs(balls[b].vx);
+                balls[b].bounceCount++;
+                sound.tone(450, 10);
+            }
+
+            // Top Wall
+            if (balls[b].y <= 10.0f) {
+                balls[b].y = 10.0f;
+                balls[b].vy = fabs(balls[b].vy);
+                balls[b].bounceCount++;
+                sound.tone(450, 10);
+            }
+
+            // Paddle Collision
+            if (balls[b].y >= 54.0f && balls[b].y <= 59.0f &&
+                balls[b].x + 3.0f >= paddleX && balls[b].x <= paddleX + paddleWidth && balls[b].vy > 0.0f) {
+                balls[b].bounceCount = 0; // Reset bounce count on paddle contact
+                if (activePowerUp == PWR_CATCH) {
+                    balls[b].stuck = true;
+                    balls[b].stuckOffset = balls[b].x - paddleX;
+                    balls[b].stuckTimer = millis();
+                    sound.tone(850, 15);
+                } else {
+                    float center = paddleX + (paddleWidth / 2.0f);
+                    float offset = (balls[b].x + 1.5f - center) / (paddleWidth / 2.0f);
+                    if (offset < -0.9f) offset = -0.9f;
+                    if (offset > 0.9f) offset = 0.9f;
+                    balls[b].vx = offset * (ballSpeed * 0.88f);
+                    balls[b].vy = -sqrt(max(0.4f, (ballSpeed * ballSpeed) - (balls[b].vx * balls[b].vx)));
+                    sound.tone(750, 15);
+                    hitsSinceSpeedUp++;
+                    if (hitsSinceSpeedUp >= 8) {
+                        hitsSinceSpeedUp = 0;
+                        ballSpeed = min(2.7f, ballSpeed + 0.1f);
+                    }
+                }
+            }
+
+            // Bricks Collision (Strict AABB)
+            if (balls[b].y <= 51.0f) {
+                for (int8_t r = 0; r < 8; r++) {
+                    for (int8_t c = 0; c < 11; c++) {
+                        if (bricks[r][c] > 0) {
+                            int16_t bx = 4 + c * 11;
+                            int16_t by = 12 + r * 5;
+                            int16_t bw = 10;
+                            int16_t bh = 4;
+
+                            if (balls[b].x + 3.0f >= bx && balls[b].x <= bx + bw &&
+                                balls[b].y + 3.0f >= by && balls[b].y <= by + bh) {
+                                float overlapLeft = (balls[b].x + 3.0f) - bx;
+                                float overlapRight = (bx + bw) - balls[b].x;
+                                float overlapTop = (balls[b].y + 3.0f) - by;
+                                float overlapBottom = (by + bh) - balls[b].y;
+
+                                float minOverlapX = min(overlapLeft, overlapRight);
+                                float minOverlapY = min(overlapTop, overlapBottom);
+
+                                if (minOverlapX < minOverlapY) {
+                                    balls[b].vx = -balls[b].vx;
+                                } else {
+                                    balls[b].vy = -balls[b].vy;
+                                }
+                                balls[b].bounceCount++;
+
+                                if (bricks[r][c] == 5) {
+                                    sound.tone(1100, 10);
+                                } else if (bricks[r][c] == 4) {
+                                    if (silverHits[r][c] == 0) {
+                                        silverHits[r][c] = 1;
+                                        sound.tone(800, 15);
+                                    } else {
+                                        bricks[r][c] = 0;
+                                        score += 100;
+                                        sound.tone(1200, 25);
+                                        maybeSpawnCapsule(bx, by);
+                                    }
+                                } else {
+                                    uint16_t pts = (bricks[r][c] == 1) ? 50 : (bricks[r][c] == 2 ? 80 : 100);
+                                    score += pts;
+                                    bricks[r][c] = 0;
+                                    sound.tone(900 + r * 60, 20);
+                                    maybeSpawnCapsule(bx, by);
+                                }
+
+                                if (countDestructibleBricks() == 0) {
+                                    advanceLevel();
+                                    return;
+                                }
+                                goto ball_collision_done;
+                            }
+                        }
+                    }
+                }
+            }
+        ball_collision_done:
+
+            // Rutina anti-atrapamiento (Anti-Tunneling / Escape Vector tras 12 rebotes seguidos sin tocar pala)
+            if (balls[b].bounceCount >= 12) {
+                float perturb = ((float)random(-15, 16) / 20.0f); // -0.75 a +0.75
+                balls[b].vx += perturb;
+                if (fabs(balls[b].vx) < 0.4f) {
+                    balls[b].vx = (balls[b].vx < 0.0f ? -0.6f : 0.6f);
+                }
+                // Si la bola está atrapada arriba o lleva demasiados rebotes en bucle, forzar escape descendente
+                if (balls[b].y <= 32.0f || balls[b].bounceCount >= 16) {
+                    balls[b].vy = fabs(balls[b].vy);
+                    if (balls[b].vy < 0.8f) balls[b].vy = 0.8f;
+                }
+                float mag = sqrt(balls[b].vx * balls[b].vx + balls[b].vy * balls[b].vy);
+                if (mag > 0.1f) {
+                    balls[b].vx = (balls[b].vx / mag) * ballSpeed;
+                    balls[b].vy = (balls[b].vy / mag) * ballSpeed;
+                }
+                balls[b].bounceCount = 0; // Resetear tras aplicar vector de escape
+            }
+
+            // Ball Out of Bounds
+            if (balls[b].y > 64.0f) {
+                balls[b].active = false;
+            }
+        }
+
+        // --- Life Loss Check (When All Active Balls Fall) ---
+        bool anyBallActive = false;
+        for (uint8_t b = 0; b < 3; b++) {
+            if (balls[b].active) { anyBallActive = true; break; }
+        }
+
+        if (!anyBallActive) {
+            lives--;
+            sound.tone(180, 150);
+            if (lives == 0) {
+                gameOver = true;
+                if (score > highScore) { highScore = score; EEPROM.put(12, highScore); }
+            } else {
+                // Respawn single ball attached to paddle
+                paddleWidth = 18.0f;
+                paddleX = (128.0f - paddleWidth) / 2.0f;
+                activePowerUp = PWR_NONE;
+                warpGateOpen = false;
+                ballSpeed = 1.4f;
+
+                balls[0].active = true;
+                balls[0].stuck = true;
+                balls[0].stuckOffset = paddleWidth / 2.0f - 1.5f;
+                balls[0].stuckTimer = millis();
+                balls[0].bounceCount = 0;
+                balls[0].x = paddleX + balls[0].stuckOffset;
+                balls[0].y = 54.0f;
+                balls[0].vx = 1.0f;
+                balls[0].vy = -1.3f;
+            }
+        }
+    }
+
+    void drawCapsule(float x, float y, uint8_t type) {
+        int16_t ix = (int16_t)x;
+        int16_t iy = (int16_t)y;
+
+        arduboy.fillRect(ix, iy, 7, 5, WHITE);
+        arduboy.drawPixel(ix, iy, BLACK);
+        arduboy.drawPixel(ix + 6, iy, BLACK);
+        arduboy.drawPixel(ix, iy + 4, BLACK);
+        arduboy.drawPixel(ix + 6, iy + 4, BLACK);
+
+        // 3x5 Mini font table: {E, L, D, C, S, B, P}
+        static const uint8_t PROGMEM miniLetters[8][5] = {
+            {0, 0, 0, 0, 0}, // None
+            {7, 4, 6, 4, 7}, // E (Expand)
+            {4, 4, 4, 4, 7}, // L (Laser)
+            {6, 5, 5, 5, 6}, // D (Disrupt / Multi-ball)
+            {3, 4, 4, 4, 3}, // C (Catch)
+            {3, 4, 2, 1, 6}, // S (Slow)
+            {6, 5, 6, 5, 6}, // B (Break / Warp)
+            {6, 5, 6, 4, 4}  // P (Extra Life)
+        };
+
+        if (type >= 1 && type <= 7) {
+            for (int8_t r = 0; r < 5; r++) {
+                uint8_t rowBits = pgm_read_byte(&miniLetters[type][r]);
+                for (int8_t c = 0; c < 3; c++) {
+                    if (rowBits & (1 << (2 - c))) {
+                        arduboy.drawPixel(ix + 2 + c, iy + r, BLACK);
+                    }
+                }
+            }
+        }
+    }
+
+    char getPowerUpChar(uint8_t type) {
+        switch (type) {
+            case PWR_EXPAND: return 'E';
+            case PWR_LASER: return 'L';
+            case PWR_DISRUPT: return 'D';
+            case PWR_CATCH: return 'C';
+            case PWR_SLOW: return 'S';
+            case PWR_BREAK: return 'B';
+            default: return ' ';
+        }
+    }
+
+    void draw() {
+        // --- Top HUD Bar ---
+        arduboy.setCursor(1, 0); arduboy.print("P:"); arduboy.print(score);
+        arduboy.setCursor(50, 0); arduboy.print("R:"); arduboy.print(currentLevel + 1);
+        if (activePowerUp != PWR_NONE) {
+            arduboy.setCursor(76, 0);
+            arduboy.print("[");
+            arduboy.print(getPowerUpChar(activePowerUp));
+            arduboy.print("]");
+        }
+        arduboy.setCursor(102, 0); arduboy.print("L:"); arduboy.print(lives);
+        arduboy.drawFastHLine(0, 9, 128, WHITE);
+
+        // --- Warp Gate (Right Wall Opening) ---
+        if (warpGateOpen) {
+            // Flashing portal animation
+            bool flash = (millis() / 150) % 2;
+            if (flash) {
+                arduboy.fillRect(125, 52, 3, 9, WHITE);
+                arduboy.drawFastHLine(125, 56, 3, BLACK);
+            } else {
+                arduboy.drawRect(125, 52, 3, 9, WHITE);
+            }
+        }
+
+        // --- Draw Bricks ---
+        for (uint8_t r = 0; r < 8; r++) {
+            for (uint8_t c = 0; c < 11; c++) {
+                uint8_t bt = bricks[r][c];
+                if (bt == 0) continue;
+                int16_t bx = 4 + c * 11;
+                int16_t by = 12 + r * 5;
+
+                if (bt == 1) {
+                    // Soft: Outline with center dot
+                    arduboy.drawRect(bx, by, 10, 4, WHITE);
+                    arduboy.drawPixel(bx + 4, by + 1, WHITE);
+                    arduboy.drawPixel(bx + 5, by + 2, WHITE);
+                } else if (bt == 2) {
+                    // Medium: Outline with inner bar
+                    arduboy.drawRect(bx, by, 10, 4, WHITE);
+                    arduboy.drawFastHLine(bx + 2, by + 1, 6, WHITE);
+                    arduboy.drawFastHLine(bx + 2, by + 2, 6, WHITE);
+                } else if (bt == 3) {
+                    // Hard: Solid filled
+                    arduboy.fillRect(bx, by, 10, 4, WHITE);
+                } else if (bt == 4) {
+                    // Silver: Solid with diamond sheen or crack
+                    arduboy.fillRect(bx, by, 10, 4, WHITE);
+                    if (silverHits[r][c] == 0) {
+                        arduboy.drawPixel(bx + 2, by + 1, BLACK);
+                        arduboy.drawPixel(bx + 7, by + 2, BLACK);
+                    } else {
+                        // Cracked look
+                        arduboy.drawFastVLine(bx + 4, by, 4, BLACK);
+                        arduboy.drawPixel(bx + 5, by + 2, BLACK);
+                    }
+                } else if (bt == 5) {
+                    // Gold / Indestructible: Metallic textured bars
+                    arduboy.drawRect(bx, by, 10, 4, WHITE);
+                    arduboy.drawFastVLine(bx + 3, by + 1, 2, WHITE);
+                    arduboy.drawFastVLine(bx + 6, by + 1, 2, WHITE);
+                }
+            }
+        }
+
+        // --- Draw Falling Capsules ---
+        for (uint8_t i = 0; i < 3; i++) {
+            if (capsules[i].active) {
+                drawCapsule(capsules[i].x, capsules[i].y, capsules[i].type);
+            }
+        }
+
+        // --- Draw Lasers ---
+        for (uint8_t i = 0; i < 4; i++) {
+            if (lasers[i].active) {
+                arduboy.fillRect((int16_t)lasers[i].x, (int16_t)lasers[i].y, 1, 3, WHITE);
+            }
+        }
+
+        // --- Draw Paddle ---
+        int16_t px = (int16_t)paddleX;
+        uint8_t pw = (uint8_t)paddleWidth;
+
+        if (activePowerUp == PWR_LASER) {
+            // Twin laser turrets
+            arduboy.fillRect(px, 56, 2, 2, WHITE);
+            arduboy.fillRect(px + pw - 2, 56, 2, 2, WHITE);
+        }
+
+        // Main rounded paddle body
+        arduboy.fillRect(px, 58, pw, 3, WHITE);
+        arduboy.drawPixel(px, 58, BLACK);
+        arduboy.drawPixel(px + pw - 1, 58, BLACK);
+
+        // --- Draw Balls ---
+        for (uint8_t b = 0; b < 3; b++) {
+            if (balls[b].active) {
+                arduboy.fillRect((int16_t)balls[b].x, (int16_t)balls[b].y, 3, 3, WHITE);
+            }
+        }
+
+        // --- Intermission / Overlay Screens ---
+        if (levelTransition) {
+            arduboy.fillRect(28, 22, 72, 20, BLACK);
+            arduboy.drawRect(28, 22, 72, 20, WHITE);
+            arduboy.setCursor(38, 28);
+            arduboy.print("ROUND ");
+            arduboy.print(currentLevel + 1);
+        } else if (gameOver) {
+            arduboy.fillRect(24, 20, 80, 26, BLACK);
+            arduboy.drawRect(24, 20, 80, 26, WHITE);
+            arduboy.setCursor(34, 24); arduboy.print("GAME OVER");
+            arduboy.setCursor(28, 33); arduboy.print("Press B3:Play");
+        } else if (victory) {
+            arduboy.fillRect(20, 18, 88, 30, BLACK);
+            arduboy.drawRect(20, 18, 88, 30, WHITE);
+            arduboy.setCursor(30, 23); arduboy.print("DOH DEFEATED!");
+            arduboy.setCursor(36, 32); arduboy.print("VICTORY!!!");
+        }
+    }
+} breakout;
+
+// =============================================================================
+// GAME 3: SPACE INVADERS (Symmetric March, Accelerating Cadence & Bunkers)
+// =============================================================================
+struct SpaceInvadersGame {
+    int16_t playerX;
+    int16_t bulletX, bulletY;
+    bool bulletActive;
+
+    struct Alien {
+        int16_t x, y;
+        bool alive;
+        uint8_t type;
+    } aliens[18];
+
+    int16_t alienDir;
+    int16_t alienSpeedTimer;
+    bool alienAnimFrame;
+    int16_t alienBombX, alienBombY;
+    bool alienBombActive;
+
+    int16_t ufoX;
+    bool ufoActive;
+
+    uint8_t bunkers[3][8]; // 3 bunkers x 8 columns of 6-bit vertical slices
+    uint16_t score;
+    uint16_t highScore;
+    uint8_t lives;
+    bool gameOver;
+    bool victory;
+
+    void init() {
+        playerX = 58;
+        bulletActive = false;
+        alienBombActive = false;
+        alienDir = 1;
+        alienSpeedTimer = 0;
+        alienAnimFrame = false;
+        ufoActive = false;
+        ufoX = -20;
+        score = 0;
+        lives = 3;
+        gameOver = false;
+        victory = false;
+
+        highScore = 0;
+        EEPROM.get(10, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+
+        for (uint8_t r = 0; r < 3; r++) {
+            for (uint8_t c = 0; c < 6; c++) {
+                uint8_t idx = r * 6 + c;
+                aliens[idx].x = 10 + (c * 16);
+                aliens[idx].y = 12 + (r * 10);
+                aliens[idx].alive = true;
+                aliens[idx].type = r; // 0: Squid, 1: Crab, 2: Octopus
+            }
+        }
+
+        for (uint8_t b = 0; b < 3; b++) {
+            for (uint8_t col = 0; col < 8; col++) {
+                bunkers[b][col] = 0x3F; // 6 bits tall
+            }
+        }
+    }
+
+    void update() {
+        if (gameOver || victory) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) init();
+            return;
+        }
+
+        // Player Controls
+        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && playerX > 2) playerX -= 2;
+        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && playerX < 114) playerX += 2;
+
+        if ((arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) && !bulletActive) {
+            bulletX = playerX + 5;
+            bulletY = 54;
+            bulletActive = true;
+            sound.tone(1200, 20);
+        }
+
+        // Bullet Movement & Collision
+        if (bulletActive) {
+            bulletY -= 3;
+            if (bulletY < 8) bulletActive = false;
+
+            // UFO Collision
+            if (ufoActive && bulletX >= ufoX && bulletX <= ufoX + 12 && bulletY <= 12) {
+                ufoActive = false;
+                bulletActive = false;
+                score += 150;
+                sound.tone(1800, 80);
+            }
+
+            // Alien Collision
+            for (uint8_t i = 0; i < 18; i++) {
+                if (aliens[i].alive && bulletActive) {
+                    if (bulletX >= aliens[i].x && bulletX <= aliens[i].x + 8 &&
+                        bulletY >= aliens[i].y && bulletY <= aliens[i].y + 8) {
+                        aliens[i].alive = false;
+                        bulletActive = false;
+                        score += (3 - aliens[i].type) * 10;
+                        sound.tone(450, 40);
+                    }
+                }
+            }
+
+            // Bunker Collision
+            for (uint8_t b = 0; b < 3; b++) {
+                int16_t bx = 20 + (b * 38);
+                if (bulletX >= bx && bulletX < bx + 8 && bulletY >= 46 && bulletY <= 52) {
+                    uint8_t col = bulletX - bx;
+                    if (bunkers[b][col] != 0) {
+                        bunkers[b][col] &= (bunkers[b][col] << 2);
+                        bulletActive = false;
+                        sound.tone(200, 15);
+                    }
+                }
+            }
+        }
+
+        // Inversely Proportional Step Cadence
+        uint8_t aliveCount = 0;
+        for (uint8_t i = 0; i < 18; i++) if (aliens[i].alive) aliveCount++;
+
+        if (aliveCount == 0) {
+            victory = true;
+            if (score > highScore) { highScore = score; EEPROM.put(10, highScore); }
+            sound.tone(1500, 150);
+            return;
+        }
+
+        alienSpeedTimer++;
+        uint8_t stepRate = (aliveCount > 12) ? 7 : ((aliveCount > 6) ? 4 : ((aliveCount > 2) ? 2 : 1));
+        if (alienSpeedTimer >= stepRate) {
+            alienSpeedTimer = 0;
+            alienAnimFrame = !alienAnimFrame;
+            sound.tone(90 + (aliveCount * 12), 12);
+
+            bool hitEdge = false;
+            for (uint8_t i = 0; i < 18; i++) {
+                if (aliens[i].alive) {
+                    if ((alienDir == 1 && aliens[i].x >= 118) || (alienDir == -1 && aliens[i].x <= 2)) {
+                        hitEdge = true;
+                        break;
+                    }
+                }
+            }
+
+            if (hitEdge) {
+                alienDir = -alienDir;
+                for (uint8_t i = 0; i < 18; i++) {
+                    aliens[i].y += 3;
+                    if (aliens[i].alive && aliens[i].y >= 48) {
+                        gameOver = true;
+                        sound.tone(120, 200);
+                    }
+                }
+            } else {
+                for (uint8_t i = 0; i < 18; i++) {
+                    aliens[i].x += (alienDir * 2);
+                }
+            }
+        }
+
+        // Alien Bomb Drops
+        if (!alienBombActive && random(0, 25) == 0) {
+            uint8_t lucky = random(0, 18);
+            if (aliens[lucky].alive) {
+                alienBombX = aliens[lucky].x + 4;
+                alienBombY = aliens[lucky].y + 8;
+                alienBombActive = true;
+            }
+        }
+
+        if (alienBombActive) {
+            alienBombY += 2;
+            if (alienBombY > 64) alienBombActive = false;
+
+            if (alienBombX >= playerX && alienBombX <= playerX + 11 && alienBombY >= 56 && alienBombY <= 62) {
+                alienBombActive = false;
+                lives--;
+                sound.tone(150, 100);
+                if (lives == 0) {
+                    gameOver = true;
+                    if (score > highScore) { highScore = score; EEPROM.put(10, highScore); }
+                }
+            }
+
+            for (uint8_t b = 0; b < 3; b++) {
+                int16_t bx = 20 + (b * 38);
+                if (alienBombX >= bx && alienBombX < bx + 8 && alienBombY >= 46 && alienBombY <= 52) {
+                    uint8_t col = alienBombX - bx;
+                    if (bunkers[b][col] != 0) {
+                        bunkers[b][col] &= (bunkers[b][col] >> 2);
+                        alienBombActive = false;
+                    }
+                }
+            }
+        }
+
+        // UFO Movement
+        if (!ufoActive && random(0, 250) == 0) {
+            ufoActive = true;
+            ufoX = -15;
+        }
+        if (ufoActive) {
+            ufoX += 2;
+            if (ufoX > 130) ufoActive = false;
+        }
+    }
+
+    void draw() {
+        arduboy.setCursor(2, 0); arduboy.print("PTS:"); arduboy.print(score);
+        arduboy.setCursor(55, 0); arduboy.print("HI:"); arduboy.print(highScore);
+        arduboy.setCursor(102, 0); arduboy.print("L:"); arduboy.print(lives);
+        arduboy.drawFastHLine(0, 9, 128, WHITE);
+
+        for (uint8_t i = 0; i < 18; i++) {
+            if (aliens[i].alive) {
+                if (aliens[i].type == 0) {
+                    arduboy.drawBitmap(aliens[i].x, aliens[i].y, alien_squid, 8, 8, WHITE);
+                } else if (aliens[i].type == 1) {
+                    arduboy.drawBitmap(aliens[i].x, aliens[i].y, alienAnimFrame ? alien_crab_1 : alien_crab_2, 8, 8, WHITE);
+                } else {
+                    arduboy.drawBitmap(aliens[i].x, aliens[i].y, alien_octopus, 8, 8, WHITE);
+                }
+            }
+        }
+
+        if (ufoActive) arduboy.drawBitmap(ufoX, 1, ufo_bmp, 12, 6, WHITE);
+
+        // Bunkers
+        for (uint8_t b = 0; b < 3; b++) {
+            int16_t bx = 20 + (b * 38);
+            for (uint8_t col = 0; col < 8; col++) {
+                uint8_t mask = bunkers[b][col];
+                for (uint8_t row = 0; row < 6; row++) {
+                    if (mask & (1 << row)) {
+                        arduboy.drawPixel(bx + col, 46 + row, WHITE);
+                    }
+                }
+            }
+        }
+
+        arduboy.drawBitmap(playerX, 56, player_ship_bmp, 11, 7, WHITE);
+
+        if (bulletActive) arduboy.drawFastVLine(bulletX, bulletY, 3, WHITE);
+        if (alienBombActive) {
+            arduboy.drawPixel(alienBombX, alienBombY, WHITE);
+            arduboy.drawPixel(alienBombX, alienBombY + 1, WHITE);
+        }
+
+        if (gameOver) {
+            arduboy.fillRect(20, 20, 88, 24, BLACK);
+            arduboy.drawRect(20, 20, 88, 24, WHITE);
+            arduboy.setCursor(34, 24); arduboy.print("GAME OVER");
+            arduboy.setCursor(24, 33); arduboy.print("Press B3:Retry");
+        } else if (victory) {
+            arduboy.fillRect(20, 20, 88, 24, BLACK);
+            arduboy.drawRect(20, 20, 88, 24, WHITE);
+            arduboy.setCursor(32, 24); arduboy.print("VICTORY!!!");
+            arduboy.setCursor(24, 33); arduboy.print("Press B3:Retry");
+        }
+    }
+} spaceInvaders;
+
+// =============================================================================
+// GAME 4: 1943 (Continuous Scrolling, Structured Formations & Accurate Hitboxes)
+// =============================================================================
+struct AirCombatGame {
+    int16_t planeX;
+    int16_t bulletX[3], bulletY[3];
+    bool bulletActive[3];
+
+    struct Enemy {
+        float x, y;
+        float vx, vy;
+        bool active;
+        uint8_t type; // 0: fighter, 1: dive curve, 2: heavy bomber
+        int8_t hp;
+        float phase;
+    } enemies[5];
+
+    struct Star {
+        int16_t x, y;
+        uint8_t speed;
+    } stars[16];
+
+    uint16_t score;
+    uint16_t highScore;
+    bool gameOver;
+
+    void init() {
+        planeX = 58;
+        score = 0;
+        gameOver = false;
+        highScore = 0;
+        EEPROM.get(16, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+
+        for (uint8_t i = 0; i < 3; i++) bulletActive[i] = false;
+
+        for (uint8_t s = 0; s < 16; s++) {
+            stars[s].x = random(0, 128);
+            stars[s].y = random(0, 64);
+            stars[s].speed = random(1, 4);
+        }
+
+        spawnWave();
+    }
+
+    void spawnWave() {
+        uint8_t waveType = random(0, 3);
+        for (uint8_t i = 0; i < 5; i++) {
+            enemies[i].active = (i < 4);
+            if (waveType == 0) {
+                // V-Formation
+                int16_t offsetX = (i % 2 == 0) ? -(i * 14) : (i * 14);
+                enemies[i].x = 64 + offsetX;
+                enemies[i].y = -10 - (i * 12);
+                enemies[i].vx = 0.0f;
+                enemies[i].vy = 1.6f;
+                enemies[i].type = 0;
+                enemies[i].hp = 1;
+                enemies[i].phase = 0;
+            } else if (waveType == 1) {
+                // Parabolic Sine Wave
+                enemies[i].x = 10 + (i * 28);
+                enemies[i].y = -15 - (i * 16);
+                enemies[i].vx = (i % 2 == 0) ? 1.4f : -1.4f;
+                enemies[i].vy = 1.3f;
+                enemies[i].type = 1;
+                enemies[i].hp = 1;
+                enemies[i].phase = i * 0.8f;
+            } else {
+                // Heavy Bomber + escorts
+                if (i == 0) {
+                    enemies[i].x = 56;
+                    enemies[i].y = -20;
+                    enemies[i].vx = 0.0f;
+                    enemies[i].vy = 0.9f;
+                    enemies[i].type = 2; // Bomber
+                    enemies[i].hp = 4;
+                    enemies[i].phase = 0;
+                } else {
+                    enemies[i].x = (i == 1) ? 20 : ((i == 2) ? 96 : 64);
+                    enemies[i].y = -35 - (i * 10);
+                    enemies[i].vx = (i == 1) ? 0.8f : ((i == 2) ? -0.8f : 0.0f);
+                    enemies[i].vy = 1.4f;
+                    enemies[i].type = 0;
+                    enemies[i].hp = 1;
+                    enemies[i].phase = 0;
+                }
+            }
+        }
+    }
+
+    void update() {
+        if (gameOver) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) init();
+            return;
+        }
+
+        // Starfield Scrolling
+        for (uint8_t s = 0; s < 16; s++) {
+            stars[s].y += stars[s].speed;
+            if (stars[s].y >= 64) {
+                stars[s].y = 0;
+                stars[s].x = random(0, 128);
+            }
+        }
+
+        // Controls
+        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && planeX > 2) planeX -= 2;
+        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && planeX < 116) planeX += 2;
+
+        static uint8_t shootTimer = 0;
+        shootTimer++;
+        if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) || shootTimer > 16) {
+            shootTimer = 0;
+            for (uint8_t i = 0; i < 3; i++) {
+                if (!bulletActive[i]) {
+                    bulletActive[i] = true;
+                    bulletX[i] = planeX + 5;
+                    bulletY[i] = 50;
+                    sound.tone(1100, 15);
+                    break;
+                }
+            }
+        }
+
+        // Bullets
+        for (uint8_t i = 0; i < 3; i++) {
+            if (bulletActive[i]) {
+                bulletY[i] -= 4;
+                if (bulletY[i] < 0) bulletActive[i] = false;
+
+                for (uint8_t e = 0; e < 5; e++) {
+                    if (enemies[e].active && bulletActive[i]) {
+                        int16_t ew = (enemies[e].type == 2) ? 15 : 9;
+                        int16_t eh = (enemies[e].type == 2) ? 9 : 7;
+                        if (bulletX[i] >= enemies[e].x && bulletX[i] <= enemies[e].x + ew &&
+                            bulletY[i] >= enemies[e].y && bulletY[i] <= enemies[e].y + eh) {
+                            bulletActive[i] = false;
+                            enemies[e].hp--;
+                            if (enemies[e].hp <= 0) {
+                                enemies[e].active = false;
+                                score += (enemies[e].type == 2) ? 150 : 50;
+                                if (score > highScore) { highScore = score; EEPROM.put(16, highScore); }
+                                sound.tone(350, 40);
+                            } else {
+                                sound.tone(700, 15);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Enemy Update
+        bool anyActive = false;
+        for (uint8_t e = 0; e < 5; e++) {
+            if (enemies[e].active) {
+                anyActive = true;
+                enemies[e].y += enemies[e].vy;
+                if (enemies[e].type == 1) {
+                    enemies[e].phase += 0.08f;
+                    enemies[e].x += sin(enemies[e].phase) * 2.2f;
+                } else {
+                    enemies[e].x += enemies[e].vx;
+                    if (enemies[e].x <= 2 || enemies[e].x >= 118) enemies[e].vx = -enemies[e].vx;
+                }
+
+                if (enemies[e].y > 64) enemies[e].active = false;
+
+                // Accurate Centered Player Collision
+                if (planeX + 8 >= enemies[e].x && planeX + 2 <= enemies[e].x + 8 &&
+                    enemies[e].y >= 48 && enemies[e].y <= 58) {
+                    gameOver = true;
+                    sound.tone(120, 150);
+                }
+            }
+        }
+
+        if (!anyActive) spawnWave();
+    }
+
+    void draw() {
+        // Starfield
+        for (uint8_t s = 0; s < 16; s++) {
+            arduboy.drawPixel(stars[s].x, stars[s].y, WHITE);
+        }
+
+        // Player
+        arduboy.drawBitmap(planeX, 52, plane_1943_bmp, 11, 9, WHITE);
+
+        // Bullets
+        for (uint8_t i = 0; i < 3; i++) {
+            if (bulletActive[i]) arduboy.drawFastVLine(bulletX[i], bulletY[i], 3, WHITE);
+        }
+
+        // Enemies
+        for (uint8_t e = 0; e < 5; e++) {
+            if (enemies[e].active) {
+                if (enemies[e].type == 2) {
+                    arduboy.drawBitmap((int16_t)enemies[e].x, (int16_t)enemies[e].y, bomber_1943_bmp, 15, 9, WHITE);
+                } else {
+                    arduboy.drawBitmap((int16_t)enemies[e].x, (int16_t)enemies[e].y, enemy_1943_bmp, 9, 7, WHITE);
+                }
+            }
+        }
+
+        arduboy.setCursor(2, 2); arduboy.print("PTS:"); arduboy.print(score);
+        arduboy.setCursor(65, 2); arduboy.print("HI:"); arduboy.print(highScore);
+
+        if (gameOver) {
+            arduboy.fillRect(24, 20, 80, 24, BLACK);
+            arduboy.drawRect(24, 20, 80, 24, WHITE);
+            arduboy.setCursor(34, 24); arduboy.print("GAME OVER");
+            arduboy.setCursor(24, 33); arduboy.print("Press B3:Retry");
+        }
+    }
+} airCombat;
+
+// =============================================================================
+// GAME 5: FLAPPY BIRD (Quadratic Gravity, Crisp Flap & AABB Pipes)
+// =============================================================================
+struct FlappyGame {
+    float birdY, velY;
+    int16_t pipeX[2];
+    int16_t pipeGapY[2];
+    uint16_t score;
+    uint16_t highScore;
+    bool gameOver;
+
+    void init() {
+        birdY = 28.0f;
+        velY = 0.0f;
+        pipeX[0] = 128; pipeGapY[0] = 22;
+        pipeX[1] = 198; pipeGapY[1] = 28;
+        score = 0;
+        gameOver = false;
+        highScore = 0;
+        EEPROM.get(18, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+    }
+
+    void update() {
+        if (gameOver) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) init();
+            return;
+        }
+
+        // Instant Flap Impulse
+        if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) ||
+            arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(RIGHT_BUTTON) ||
+            arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+            velY = -2.8f;
+            sound.tone(950, 18);
+        }
+
+        // Quadratic Gravity
+        velY += 0.22f;
+        birdY += velY;
+
+        if (birdY < 0) birdY = 0;
+        if (birdY > 58.0f) {
+            gameOver = true;
+            sound.tone(180, 100);
+            if (score > highScore) { highScore = score; EEPROM.put(18, highScore); }
+        }
+
+        // Pipe Scrolling & Strict AABB Collision
+        for (uint8_t i = 0; i < 2; i++) {
+            pipeX[i] -= 2;
+            if (pipeX[i] < -14) {
+                pipeX[i] = 128;
+                pipeGapY[i] = random(10, 36);
+                score++;
+                if (score > highScore) { highScore = score; EEPROM.put(18, highScore); }
+                sound.tone(1400, 30);
+            }
+
+            // Bird AABB Box at x=18..24, y=birdY-3..birdY+3
+            if (pipeX[i] < 24 && pipeX[i] + 12 > 18) {
+                if ((birdY - 3.0f < pipeGapY[i]) || (birdY + 3.0f > pipeGapY[i] + 22)) {
+                    gameOver = true;
+                    sound.tone(150, 120);
+                    if (score > highScore) { highScore = score; EEPROM.put(18, highScore); }
+                }
+            }
+        }
+    }
+
+    void draw() {
+        // Draw Pipes
+        for (uint8_t i = 0; i < 2; i++) {
+            arduboy.fillRect(pipeX[i], 0, 12, pipeGapY[i], WHITE);
+            arduboy.fillRect(pipeX[i], pipeGapY[i] + 22, 12, 64 - (pipeGapY[i] + 22), WHITE);
+            arduboy.drawRect(pipeX[i] - 1, pipeGapY[i] - 3, 14, 3, WHITE);
+            arduboy.drawRect(pipeX[i] - 1, pipeGapY[i] + 22, 14, 3, WHITE);
+        }
+
+        // Bird (Circle with eye & beak)
+        arduboy.fillCircle(20, (int16_t)birdY, 3, WHITE);
+        arduboy.drawPixel(22, (int16_t)birdY - 1, BLACK); // Eye
+        arduboy.drawPixel(24, (int16_t)birdY, WHITE);     // Beak
+
+        arduboy.setCursor(2, 2); arduboy.print("PTS: "); arduboy.print(score);
+        arduboy.setCursor(65, 2); arduboy.print("HI: "); arduboy.print(highScore);
+
+        if (gameOver) {
+            arduboy.fillRect(24, 20, 80, 24, BLACK);
+            arduboy.drawRect(24, 20, 80, 24, WHITE);
+            arduboy.setCursor(34, 24); arduboy.print("GAME OVER");
+            arduboy.setCursor(24, 33); arduboy.print("Press B3:Flap");
+        }
+    }
+} flappy;
+
+// =============================================================================
+// GAME 6: SNAKE (Grid-Locked 4x4, Circular Buffer O(1) & 180° Turn Lock)
+// =============================================================================
+struct SnakeGame {
+    enum Direction { DIR_UP = 0, DIR_RIGHT, DIR_DOWN, DIR_LEFT };
+
+    struct Point {
+        int8_t x, y;
+    };
+
+    Point body[128];
+    uint8_t headIdx;
+    uint8_t tailIdx;
+    uint8_t length;
+
+    Direction currentDir;
+    Direction nextDir;
+    Point food;
+    uint16_t score;
+    uint16_t highScore;
+    uint8_t tickCount;
+    uint8_t speedTicks;
+    bool gameOver;
+
+    void init() {
+        length = 4;
+        headIdx = 3;
+        tailIdx = 0;
+        currentDir = DIR_RIGHT;
+        nextDir = DIR_RIGHT;
+        score = 0;
+        tickCount = 0;
+        speedTicks = 7;
+        gameOver = false;
+
+        highScore = 0;
+        EEPROM.get(20, highScore);
+        if (highScore == 0xFFFF) highScore = 0;
+
+        for (uint8_t i = 0; i < length; i++) {
+            body[i].x = 10 + i;
+            body[i].y = 8;
+        }
+
+        spawnFood();
+    }
+
+    void spawnFood() {
+        bool valid = false;
+        while (!valid) {
+            food.x = random(1, 31);
+            food.y = random(2, 15);
+            valid = true;
+            for (uint8_t i = 0; i < length; i++) {
+                uint8_t idx = (tailIdx + i) % 128;
+                if (body[idx].x == food.x && body[idx].y == food.y) {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    void update() {
+        if (gameOver) {
+            if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) init();
+            return;
+        }
+
+        // Direction Input with Strict 180° Reverse Lock
+        if ((arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(A_BUTTON)) && currentDir != DIR_DOWN) {
+            nextDir = DIR_UP;
+        } else if ((arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(B_BUTTON)) && currentDir != DIR_UP) {
+            nextDir = DIR_DOWN;
+        } else if (arduboy.justPressed(LEFT_BUTTON) && currentDir != DIR_RIGHT) {
+            nextDir = DIR_LEFT;
+        } else if (arduboy.justPressed(RIGHT_BUTTON) && currentDir != DIR_LEFT) {
+            nextDir = DIR_RIGHT;
+        }
+
+        tickCount++;
+        if (tickCount >= speedTicks) {
+            tickCount = 0;
+            currentDir = nextDir;
+
+            Point newHead = body[headIdx];
+            if (currentDir == DIR_UP) newHead.y--;
+            else if (currentDir == DIR_DOWN) newHead.y++;
+            else if (currentDir == DIR_LEFT) newHead.x--;
+            else if (currentDir == DIR_RIGHT) newHead.x++;
+
+            // Wall Collision
+            if (newHead.x < 0 || newHead.x >= 32 || newHead.y < 2 || newHead.y >= 16) {
+                gameOver = true;
+                sound.tone(140, 120);
+                if (score > highScore) { highScore = score; EEPROM.put(20, highScore); }
+                return;
+            }
+
+            // Self Collision
+            for (uint8_t i = 0; i < length; i++) {
+                uint8_t idx = (tailIdx + i) % 128;
+                if (body[idx].x == newHead.x && body[idx].y == newHead.y) {
+                    gameOver = true;
+                    sound.tone(140, 120);
+                    if (score > highScore) { highScore = score; EEPROM.put(20, highScore); }
+                    return;
+                }
+            }
+
+            // Move Head in Circular Buffer O(1)
+            headIdx = (headIdx + 1) % 128;
+            body[headIdx] = newHead;
+
+            // Food Check
+            if (newHead.x == food.x && newHead.y == food.y) {
+                score += 10;
+                length++;
+                if (length % 4 == 0 && speedTicks > 2) speedTicks--;
+                if (score > highScore) { highScore = score; EEPROM.put(20, highScore); }
+                sound.tone(1200, 20);
+                spawnFood();
+            } else {
+                tailIdx = (tailIdx + 1) % 128; // Pop Tail O(1)
+            }
+        }
+    }
+
+    void draw() {
+        arduboy.setCursor(2, 0); arduboy.print("PTS:"); arduboy.print(score);
+        arduboy.setCursor(65, 0); arduboy.print("HI:"); arduboy.print(highScore);
+        arduboy.drawFastHLine(0, 8, 128, WHITE);
+
+        // Draw Food
+        arduboy.fillRect(food.x * 4 + 1, food.y * 4 + 1, 2, 2, WHITE);
+
+        // Draw Snake Body
+        for (uint8_t i = 0; i < length; i++) {
+            uint8_t idx = (tailIdx + i) % 128;
+            arduboy.fillRect(body[idx].x * 4, body[idx].y * 4, 3, 3, WHITE);
+        }
+
+        if (gameOver) {
+            arduboy.fillRect(24, 20, 80, 24, BLACK);
+            arduboy.drawRect(24, 20, 80, 24, WHITE);
+            arduboy.setCursor(34, 24); arduboy.print("GAME OVER");
+            arduboy.setCursor(24, 33); arduboy.print("Press B3:Retry");
+        }
+    }
+} snake;
+
+// =============================================================================
+// GAME 7: JUMP MAN (Authentic Source Import, Full 128px Screen & Smooth Scrolling)
+// =============================================================================
+struct JumpManGame {
+    float dinoY;
+    float velocidadY;
+    bool enSuelo;
+    const float SALTO_INIT = -4.5f;
+    const float GRAVEDAD = 0.25f;
+    const float SUELO_Y = 47.0f;
+
+    struct Obstaculo {
+        float x;          // Pixel coordinate, starts strictly at 128.0f
+        int ancho;        // columns (1..6)
+        int tipo[6];      // 1..3
+    } obstaculo;
+
+    unsigned long tiempoUltimoMovimiento;
+    unsigned long tiempoUltimoFrame;
+
+    int puntaje;
+    int puntajeMaximo;
+    bool esNoche;
+
+    #define NUM_NUBES 3
+    int nubeX[NUM_NUBES];
+    int nubeY[NUM_NUBES];
+
+    #define NUM_PUNTOS 24
+    int puntosX[NUM_PUNTOS];
+    int puntosY[NUM_PUNTOS];
+
+    #define MSG_COUNT 5
+    const char* mensajes[MSG_COUNT] = {
+        "GAME OVER",
+        "YOU LOSE",
+        "RETIRATE",
+        "TU NO SILVE",
+        "LONG_TWO_LINE"
+    };
+    int colaIndices[MSG_COUNT];
+    int colaPos;
+    int ultimoMensajeIdx;
+
+    int solX;
+    int lunaX;
+    const int SOL_Y = 12;
+    const int SOL_RADIO = 5;
+
+    bool inGameOverScreen;
+    uint32_t gameOverTimer;
+    int currentMsgIdx;
+
+    void init() {
+        dinoY = SUELO_Y;
+        velocidadY = 0.0f;
+        enSuelo = true;
+        puntaje = 0;
+        esNoche = false;
+        solX = 105;
+        lunaX = 105;
+        inGameOverScreen = false;
+        ultimoMensajeIdx = -1;
+
+        puntajeMaximo = 0;
+        EEPROM.get(22, puntajeMaximo);
+        if (puntajeMaximo == 0xFFFF) puntajeMaximo = 0;
+
+        for (int i = 0; i < NUM_PUNTOS; i++) {
+            puntosX[i] = random(0, 128);
+            puntosY[i] = 58 + random(0, 4);
+        }
+        nubeX[0] = 40; nubeY[0] = 20;
+        nubeX[1] = 90; nubeY[1] = 26;
+        nubeX[2] = 140; nubeY[2] = 22;
+
+        inicializarColaMensajes();
+        generarObstaculo();
+        tiempoUltimoMovimiento = millis();
+        tiempoUltimoFrame = millis();
+    }
+
+    void inicializarColaMensajes() {
+        for (int i = 0; i < MSG_COUNT; i++) colaIndices[i] = i;
+        for (int i = MSG_COUNT - 1; i > 0; i--) {
+            int j = random(0, i + 1);
+            int tmp = colaIndices[i];
+            colaIndices[i] = colaIndices[j];
+            colaIndices[j] = tmp;
+        }
+        if (ultimoMensajeIdx >= 0 && colaIndices[0] == ultimoMensajeIdx && MSG_COUNT > 1) {
+            int tmp = colaIndices[0];
+            colaIndices[0] = colaIndices[1];
+            colaIndices[1] = tmp;
+        }
+        colaPos = 0;
+    }
+
+    int obtenerSiguienteMensajeIdx() {
+        if (colaPos >= MSG_COUNT) inicializarColaMensajes();
+        int idx = colaIndices[colaPos++];
+        if (idx == ultimoMensajeIdx) {
+            if (colaPos < MSG_COUNT) idx = colaIndices[colaPos++];
+            else {
+                inicializarColaMensajes();
+                idx = colaIndices[colaPos++];
+            }
+        }
+        ultimoMensajeIdx = idx;
+        return idx;
+    }
+
+    void generarObstaculo() {
+        obstaculo.x = 128.0f; // Obligatoriamente fuera del borde derecho de la pantalla
+        bool esSimple = random(0, 10) > map(puntaje, 0, 15, 3, 8);
+        if (esSimple) {
+            int ancho = random(1, 4);
+            obstaculo.ancho = ancho;
+            for (int i = 0; i < ancho; i++) obstaculo.tipo[i] = random(1, 4);
+        } else {
+            int patrones = random(0, 5);
+            obstaculo.ancho = 6;
+            for (int i = 0; i < 6; i++) obstaculo.tipo[i] = 0;
+            if (patrones == 0) { obstaculo.tipo[0] = 2; obstaculo.tipo[4] = 2; }
+            else if (patrones == 1) { obstaculo.tipo[0] = 1; obstaculo.tipo[4] = 3; obstaculo.tipo[5] = 3; }
+            else if (patrones == 2) { obstaculo.tipo[0] = 3; obstaculo.tipo[1] = 3; obstaculo.tipo[5] = 1; }
+            else if (patrones == 3) { obstaculo.tipo[0] = 2; obstaculo.tipo[4] = 2; obstaculo.tipo[5] = 2; }
+            else if (patrones == 4) { obstaculo.tipo[0] = 1; obstaculo.tipo[4] = 1; }
+        }
+    }
+
+    void moverObstaculo() {
+        obstaculo.x -= 1.0f; // Desplazamiento progresivo pixel a pixel hacia la izquierda
+        if (obstaculo.x + (obstaculo.ancho * 6) < 0) {
+            puntaje++;
+            if (puntaje > puntajeMaximo) {
+                puntajeMaximo = puntaje;
+                EEPROM.put(22, puntajeMaximo);
+                sound.tone(1200, 150);
+            }
+            generarObstaculo();
+        }
+    }
+
+    void update() {
+        if (inGameOverScreen) {
+            if (millis() - gameOverTimer > 1800 || arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) {
+                init();
+            }
+            return;
+        }
+
+        unsigned long ahora = millis();
+        // Velocidad adaptativa suave pixel a pixel
+        unsigned long stepInterval = max(9UL, 20UL - (unsigned long)(min(30, puntaje) * 0.35f));
+
+        if (ahora - tiempoUltimoMovimiento >= stepInterval) {
+            moverObstaculo();
+            tiempoUltimoMovimiento = ahora;
+        }
+
+        // Jump physics & Button reading (B3 / B4 / D-Pad jump)
+        if ((arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) ||
+             arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) && enSuelo) {
+            velocidadY = SALTO_INIT;
+            enSuelo = false;
+            sound.tone(1000, 60);
+        }
+
+        if (!enSuelo) {
+            velocidadY += GRAVEDAD;
+            dinoY += velocidadY;
+            if (dinoY >= SUELO_Y) {
+                dinoY = SUELO_Y;
+                velocidadY = 0.0f;
+                enSuelo = true;
+            }
+        }
+
+        // Clouds movement
+        for (int i = 0; i < NUM_NUBES; i++) {
+            nubeX[i] -= 1;
+            if (nubeX[i] < -24) {
+                nubeX[i] = 128 + random(10, 40);
+                nubeY[i] = random(18, 30);
+            }
+        }
+
+        // Day/Night switch
+        esNoche = (puntaje >= 3);
+
+        // Strict Collision Detection (Dino at X = 16)
+        int dinoX = 16;
+        int dinoAncho = 5;
+        int dinoAlto = 8;
+        int currentDinoY = (int)dinoY;
+
+        for (int i = 0; i < obstaculo.ancho; i++) {
+            if (obstaculo.tipo[i] != 0) {
+                int obsX = (int)obstaculo.x + (i * 6);
+                int obsY = 47;
+                int obsAncho = 5;
+                int obsAlto = 8;
+
+                bool colisionX = (dinoX < obsX + obsAncho) && (dinoX + dinoAncho > obsX);
+                bool colisionY = (currentDinoY < obsY + obsAlto) && (currentDinoY + dinoAlto > obsY);
+
+                if (colisionX && colisionY) {
+                    sound.tone(300, 200);
+                    currentMsgIdx = obtenerSiguienteMensajeIdx();
+                    inGameOverScreen = true;
+                    gameOverTimer = millis();
+                    return;
+                }
+            }
+        }
+    }
+
+    void draw() {
+        if (inGameOverScreen) {
+            if (strcmp(mensajes[currentMsgIdx], "LONG_TWO_LINE") == 0) {
+                arduboy.setCursor(14, 20); arduboy.print("JAJAJA, JUMPMAN?");
+                arduboy.setCursor(6, 32); arduboy.print("SHITMAN SOUND BETTER");
+            } else {
+                arduboy.setCursor(34, 26); arduboy.print(mensajes[currentMsgIdx]);
+            }
+            return;
+        }
+
+        // Horizon Ground Line
+        arduboy.drawFastHLine(0, 55, 128, WHITE);
+
+        // Sand Particles
+        for (int i = 0; i < NUM_PUNTOS; i++) {
+            arduboy.drawPixel(puntosX[i], puntosY[i], WHITE);
+        }
+
+        // Clouds
+        for (int i = 0; i < NUM_NUBES; i++) {
+            int nx = nubeX[i];
+            int ny = nubeY[i];
+            arduboy.drawCircle(nx, ny, 3, WHITE);
+            arduboy.drawCircle(nx + 4, ny + 1, 4, WHITE);
+            arduboy.drawCircle(nx + 8, ny, 3, WHITE);
+        }
+
+        // Sun / Moon
+        if (!esNoche) {
+            arduboy.fillCircle(solX, SOL_Y, SOL_RADIO, WHITE);
+        } else {
+            arduboy.fillCircle(lunaX, SOL_Y, SOL_RADIO, WHITE);
+            arduboy.fillCircle(lunaX + 4, SOL_Y, SOL_RADIO, BLACK);
+        }
+
+        // Dino Sprite at X = 16
+        const uint8_t* spriteActual = jm_dinoChar;
+        if (!enSuelo) {
+            if (velocidadY < -1.5f) spriteActual = jm_saltoPico;
+            else if (velocidadY > 1.5f) spriteActual = jm_saltoBajada;
+            else spriteActual = jm_saltoInicio;
+        }
+        draw5x8Sprite(16, (int16_t)dinoY, spriteActual, WHITE);
+
+        // Obstacles (Smooth pixel rendering across the 128px screen)
+        for (int i = 0; i < obstaculo.ancho; i++) {
+            if (obstaculo.tipo[i] != 0) {
+                int16_t ox = (int16_t)obstaculo.x + (i * 6);
+                if (ox >= -6 && ox < 128) {
+                    int ot = obstaculo.tipo[i];
+                    if (ot == 1) draw5x8Sprite(ox, 47, jm_obstaculo1, WHITE);
+                    else if (ot == 2) draw5x8Sprite(ox, 47, jm_obstaculo2, WHITE);
+                    else if (ot == 3) draw5x8Sprite(ox, 47, jm_obstaculo3, WHITE);
+                }
+            }
+        }
+
+        // HUD: M:000 P:000
+        arduboy.setCursor(2, 2);
+        arduboy.print("M:");
+        if (puntajeMaximo < 10) arduboy.print("00");
+        else if (puntajeMaximo < 100) arduboy.print("0");
+        arduboy.print(puntajeMaximo);
+        arduboy.print(" P:");
+        if (puntaje < 10) arduboy.print("00");
+        else if (puntaje < 100) arduboy.print("0");
+        arduboy.print(puntaje);
+    }
+} jumpMan;
+
+// =============================================================================
+// SYSTEM STATE & SELECTOR MENU (7 Classic Titles)
+// =============================================================================
+enum SystemState {
+    STATE_MENU = 0,
+    STATE_PING_PONG,
+    STATE_BREAKOUT,
+    STATE_SPACE_INVADERS,
+    STATE_1943,
+    STATE_FLAPPY_BIRD,
+    STATE_SNAKE,
+    STATE_JUMP_MAN
+};
+
+SystemState currentState = STATE_MENU;
+int8_t menuCursor = 0;
+const char* menuItems[] = {
+    "1. Ping Pong",
+    "2. Breakout",
+    "3. Space Invaders",
+    "4. 1943",
+    "5. Flappy Bird",
+    "6. Snake",
+    "7. Jump Man"
+};
+const uint8_t MENU_COUNT = 7;
+
+// System Pause & Power Management State
+bool gamePaused = false;
+bool isScreenSleeping = false;
+unsigned long bootPressStart = 0;
+bool bootWasPressed = false;
+const unsigned long INACTIVITY_TIMEOUT_MS = 90000UL; // 90s timeout de inactividad
+unsigned long lastActivityTime = 0;
+
+void enterDeepSleep(const char* message = "APAGANDO...") {
+    arduboy.clear();
+    arduboy.fillRect(10, 18, 108, 28, BLACK);
+    arduboy.drawRect(10, 18, 108, 28, WHITE);
+    arduboy.drawRect(12, 20, 104, 24, WHITE);
+    arduboy.setCursor(24, 28);
+    arduboy.print(message);
+    arduboy.display();
+
+    // Power-off sound sequence on GPIO 2
+    sound.tone(880, 50); delay(70);
+    sound.tone(659, 70); delay(90);
+    sound.tone(440, 100); delay(120);
+    sound.tone(220, 160); delay(200);
+    sound.noTone();
+
+    // Turn off display to conserve power
+    arduboy.clear();
+    arduboy.display();
+    Arduboy2Core::sendCommand(SSD1306_DISPLAYOFF);
+
+    // Turn off buzzer output pin
+    pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
+    digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
+
+    // Configure wake-up on GPIO 9 (BOOT button pressed LOW)
+    esp_deep_sleep_enable_gpio_wakeup((1ULL << ARDUBOY_PIN_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
+
+    // Wait until button is released to prevent immediate wakeup
+    while (digitalRead(ARDUBOY_PIN_BOOT) == LOW) {
+        delay(20);
+    }
+    delay(100);
+    esp_deep_sleep_start();
+}
+
+void setup() {
+    pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
+
+    // -------------------------------------------------------------------------
+    // POWER-ON: REQUERIR PULSACIÓN SOSTENIDA DE 3 SEGUNDOS TRAS DEEP SLEEP
+    // -------------------------------------------------------------------------
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_GPIO || wakeup_reason == ESP_SLEEP_WAKEUP_EXT1) {
+        uint32_t pressStart = millis();
+        bool powerOnConfirmed = false;
+
+        while (digitalRead(ARDUBOY_PIN_BOOT) == LOW) {
+            if (millis() - pressStart >= 3000) {
+                powerOnConfirmed = true;
+                break; // Cumplió los 3 segundos continuos
+            }
+            delay(10);
+        }
+
+        if (!powerOnConfirmed) {
+            // Si el usuario soltó antes de 3s: abortar arranque y volver de inmediato a Deep Sleep
+            esp_deep_sleep_enable_gpio_wakeup((1ULL << ARDUBOY_PIN_BOOT), ESP_GPIO_WAKEUP_GPIO_LOW);
+            esp_deep_sleep_start();
+        }
+
+        // Pitido breve de confirmación de encendido en el Buzzer (GPIO 2)
+        pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
+        tone(ARDUBOY_PIN_BUZZER, 1400, 60);
+        delay(80);
+        noTone(ARDUBOY_PIN_BUZZER);
+
+        // Esperar a que se suelte el botón BOOT para no disparar pausas inmediatas
+        while (digitalRead(ARDUBOY_PIN_BOOT) == LOW) {
+            delay(10);
+        }
+        delay(50);
+    }
+
+    Serial.begin(115200);
+    delay(50);
+
+    // Boot Arduboy2 Core (OLED on SDA=19, SCL=20 | Buttons: B1=8, B2=14, B3=15, B4=18 | BOOT=9 | Buzzer=2)
+    arduboy.begin();
+    arduboy.setFrameRate(60);
+
+    lastActivityTime = millis();
+
+    sound.tone(880, 40); delay(50);
+    sound.tone(1760, 60);
+
+    Serial.println("[ESP32-C6] Retro Console 7-in-1 Ready (Buzzer=GPIO2, B1=GPIO8, BOOT=GPIO9, Standby=90s)!");
+}
+
+void loop() {
+    // -------------------------------------------------------------------------
+    // STANDBY POR SOFTWARE / SCREEN BLANKING (WAKEUP INMEDIATO SIN BUG I2C)
+    // -------------------------------------------------------------------------
+    if (isScreenSleeping) {
+        // En reposo: omitir renderizado y físicas; monitorizar los 5 botones (8, 9, 14, 15, 18)
+        bool btn1 = (digitalRead(ARDUBOY_PIN_BTN1) == LOW); // GPIO 8
+        bool btn2 = (digitalRead(ARDUBOY_PIN_BTN2) == LOW); // GPIO 14
+        bool btn3 = (digitalRead(ARDUBOY_PIN_BTN3) == LOW); // GPIO 15
+        bool btn4 = (digitalRead(ARDUBOY_PIN_BTN4) == LOW); // GPIO 18
+        bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW); // GPIO 9
+
+        if (btn1 || btn2 || btn3 || btn4 || boot) {
+            // Despertar inmediato: Encender panel OLED y refrescar pantalla
+            Arduboy2Core::sendCommand(SSD1306_DISPLAYON);
+            arduboy.display();
+            sound.tone(1200, 25);
+            isScreenSleeping = false;
+            lastActivityTime = millis();
+            bootWasPressed = false;
+            delay(150); // Debounce de despertar
+        } else {
+            delay(10);
+        }
+        return;
+    }
+
+    // Reset inactivity timer whenever any button is pressed
+    if (arduboy.buttonsState() != 0 || digitalRead(ARDUBOY_PIN_BOOT) == LOW) {
+        lastActivityTime = millis();
+    }
+
+    // Auto Standby tras 90s de inactividad (Screen Blanking)
+    if (millis() - lastActivityTime >= INACTIVITY_TIMEOUT_MS) {
+        sound.noTone();
+        Arduboy2Core::sendCommand(SSD1306_DISPLAYOFF);
+        isScreenSleeping = true;
+        return;
+    }
+
+    // Check BOOT button (GPIO 9) for Pause (short click) & Deep Sleep (hold 3-4s)
+    bool bootNow = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);
+    if (bootNow && !bootWasPressed) {
+        bootPressStart = millis();
+        bootWasPressed = true;
+    } else if (bootNow && bootWasPressed) {
+        unsigned long holdMs = millis() - bootPressStart;
+        if (holdMs >= 3000) {
+            enterDeepSleep("APAGANDO...");
+        }
+    } else if (!bootNow && bootWasPressed) {
+        unsigned long duration = millis() - bootPressStart;
+        bootWasPressed = false;
+        if (duration >= 40 && duration < 2500) {
+            // Short press: Toggle Pause if inside an active game
+            if (currentState != STATE_MENU) {
+                gamePaused = !gamePaused;
+                if (gamePaused) {
+                    sound.tone(600, 30);
+                } else {
+                    sound.tone(900, 30);
+                }
+            }
+        }
+    }
+
+    if (!arduboy.nextFrame()) return;
+
+    arduboy.clear();
+
+    // Universal Exit Combo: Hold B1 (GPIO 8) + B4 (GPIO 18) or B3 + B4 returns to menu
+    if (currentState != STATE_MENU) {
+        if ((arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
+            (arduboy.pressed(A_BUTTON) && arduboy.pressed(B_BUTTON))) {
+            sound.tone(600, 30);
+            gamePaused = false;
+            currentState = STATE_MENU;
+        }
+    }
+
+    switch (currentState) {
+        case STATE_MENU: {
+            gamePaused = false;
+
+            // Header Bar
+            arduboy.fillRect(0, 0, 128, 9, WHITE);
+            arduboy.setTextColor(BLACK);
+            arduboy.setCursor(8, 1);
+            arduboy.print("ESP32-C6 RETRO ARCADE");
+            arduboy.setTextColor(WHITE);
+
+            // Menu Viewport (Displays 5 items with smooth scrolling)
+            uint8_t startIdx = 0;
+            if (menuCursor > 3) startIdx = menuCursor - 3;
+            if (startIdx + 5 > MENU_COUNT) startIdx = MENU_COUNT - 5;
+
+            for (uint8_t i = 0; i < 5; i++) {
+                uint8_t itemIdx = startIdx + i;
+                int16_t y = 11 + (i * 9);
+                if (itemIdx == menuCursor) {
+                    arduboy.fillRect(2, y - 1, 124, 9, WHITE);
+                    arduboy.setTextColor(BLACK);
+                    arduboy.setCursor(6, y);
+                    arduboy.print("> ");
+                    arduboy.print(menuItems[itemIdx]);
+                    arduboy.setTextColor(WHITE);
+                } else {
+                    arduboy.setCursor(6, y);
+                    arduboy.print("  ");
+                    arduboy.print(menuItems[itemIdx]);
+                }
+            }
+
+            // Bottom Navigation Bar
+            arduboy.drawFastHLine(0, 56, 128, WHITE);
+            arduboy.setCursor(2, 57);
+            arduboy.print("B1/B2:Mover  B3:Jugar");
+
+            if (arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(UP_BUTTON)) {
+                sound.tone(880, 15);
+                menuCursor--;
+                if (menuCursor < 0) menuCursor = MENU_COUNT - 1;
+            }
+            if (arduboy.justPressed(RIGHT_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+                sound.tone(700, 15);
+                menuCursor++;
+                if (menuCursor >= MENU_COUNT) menuCursor = 0;
+            }
+
+            if (arduboy.justPressed(A_BUTTON)) {
+                sound.tone(1760, 50);
+                gamePaused = false;
+                if (menuCursor == 0) { pingPong.init(); currentState = STATE_PING_PONG; }
+                else if (menuCursor == 1) { breakout.init(); currentState = STATE_BREAKOUT; }
+                else if (menuCursor == 2) { spaceInvaders.init(); currentState = STATE_SPACE_INVADERS; }
+                else if (menuCursor == 3) { airCombat.init(); currentState = STATE_1943; }
+                else if (menuCursor == 4) { flappy.init(); currentState = STATE_FLAPPY_BIRD; }
+                else if (menuCursor == 5) { snake.init(); currentState = STATE_SNAKE; }
+                else if (menuCursor == 6) { jumpMan.init(); currentState = STATE_JUMP_MAN; }
+            }
+            break;
+        }
+
+        case STATE_PING_PONG:
+            if (!gamePaused) pingPong.update();
+            pingPong.draw();
+            break;
+
+        case STATE_BREAKOUT:
+            if (!gamePaused) breakout.update();
+            breakout.draw();
+            break;
+
+        case STATE_SPACE_INVADERS:
+            if (!gamePaused) spaceInvaders.update();
+            spaceInvaders.draw();
+            break;
+
+        case STATE_1943:
+            if (!gamePaused) airCombat.update();
+            airCombat.draw();
+            break;
+
+        case STATE_FLAPPY_BIRD:
+            if (!gamePaused) flappy.update();
+            flappy.draw();
+            break;
+
+        case STATE_SNAKE:
+            if (!gamePaused) snake.update();
+            snake.draw();
+            break;
+
+        case STATE_JUMP_MAN:
+            if (!gamePaused) jumpMan.update();
+            jumpMan.draw();
+            break;
+    }
+
+    // Pause Overlay Window
+    if (currentState != STATE_MENU && gamePaused) {
+        arduboy.fillRect(20, 18, 88, 28, BLACK);
+        arduboy.drawRect(20, 18, 88, 28, WHITE);
+        arduboy.drawRect(22, 20, 84, 24, WHITE);
+        arduboy.setCursor(46, 23);
+        arduboy.print("PAUSA");
+        arduboy.setCursor(26, 33);
+        arduboy.print("BOOT: Continuar");
+    }
+
+    arduboy.display();
+}
