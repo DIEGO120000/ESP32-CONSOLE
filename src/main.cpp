@@ -3492,9 +3492,15 @@ struct TRexGame {
 // GAME 11: TIC-TAC-TOE 3D (Isometric Perspective, 3 AI Levels, Pixel-Perfect HUD)
 // =============================================================================
 enum TTTState {
-    TTT_SELECT_DIFFICULTY = 0,
+    TTT_SELECT_MODE = 0,
+    TTT_SELECT_DIFFICULTY,
     TTT_PLAYING,
     TTT_GAME_OVER
+};
+
+enum TTTGameMode {
+    TTT_MODE_1P = 0,
+    TTT_MODE_2P
 };
 
 enum TTTDifficulty {
@@ -3505,14 +3511,17 @@ enum TTTDifficulty {
 
 struct TicTacToeGame {
     TTTState state;
+    TTTGameMode gameMode;
+    int8_t modeCursor; // 0: 1 PLAYER, 1: 2 PLAYERS
     TTTDifficulty difficulty;
     int8_t diffCursor; // 0: EASY, 1: HARD, 2: BRAVE
-    uint8_t board[3][3]; // 0: Empty, 1: PLY ('X'), 2: CPU ('O')
+    uint8_t board[3][3]; // 0: Empty, 1: P1 ('X'), 2: CPU / P2 ('O')
     int8_t cursorRow, cursorCol;
     uint16_t playerScore, cpuScore;
-    uint8_t winner; // 0: in progress, 1: PLY, 2: CPU, 3: Tie
+    uint8_t winner; // 0: in progress, 1: P1, 2: CPU / P2, 3: Tie
     int8_t winLineType; // 0..2: rows, 3..5: cols, 6: diag TL-BR, 7: diag TR-BL, -1: none
-    bool playerTurn;
+    bool playerTurn; // En 1P: true = turno humano, false = CPU
+    uint8_t turnPlayer; // En 2P: 1 = Turno P1 ('X'), 2 = Turno P2 ('O')
     bool cpuTurnPending;
     unsigned long turnDelayTimer;
     bool bootActionTriggered;
@@ -3541,8 +3550,10 @@ struct TicTacToeGame {
 
     void init() {
         melodyPlayer.stop();
-        state = TTT_SELECT_DIFFICULTY;
+        state = TTT_SELECT_MODE;
+        modeCursor = 0;
         diffCursor = 0;
+        gameMode = TTT_MODE_1P;
         playerScore = 0;
         cpuScore = 0;
         cursorRow = 1;
@@ -3556,6 +3567,7 @@ struct TicTacToeGame {
         winner = 0;
         winLineType = -1;
         playerTurn = true;
+        turnPlayer = 1; // P1 siempre inicia la ronda
         cpuTurnPending = false;
         cursorRow = 1;
         cursorCol = 1;
@@ -3568,7 +3580,9 @@ struct TicTacToeGame {
 
     void update() {
         yield();
-        if (state == TTT_SELECT_DIFFICULTY) {
+        if (state == TTT_SELECT_MODE) {
+            updateModeSelect();
+        } else if (state == TTT_SELECT_DIFFICULTY) {
             updateDifficultySelect();
         } else if (state == TTT_PLAYING) {
             updatePlaying();
@@ -3577,6 +3591,35 @@ struct TicTacToeGame {
         }
         bootActionTriggered = false;
         yield();
+    }
+
+    void updateModeSelect() {
+        // B1 (GPIO 14) -> ARRIBA / IZQUIERDA
+        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+            modeCursor--;
+            if (modeCursor < 0) modeCursor = 1;
+            sound.tone(900, 15);
+        }
+        // B2 (GPIO 0) -> ABAJO / DERECHA
+        else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+            modeCursor++;
+            if (modeCursor > 1) modeCursor = 0;
+            sound.tone(900, 15);
+        }
+
+        // Confirmación con BOOT (GPIO 9) o Botón 3 (GPIO 7 - A_BUTTON)
+        if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
+            sound.tone(1200, 40);
+            if (modeCursor == 0) {
+                gameMode = TTT_MODE_1P;
+                diffCursor = 0;
+                state = TTT_SELECT_DIFFICULTY;
+            } else {
+                gameMode = TTT_MODE_2P;
+                resetRound();
+                state = TTT_PLAYING;
+            }
+        }
     }
 
     void updateDifficultySelect() {
@@ -3603,70 +3646,124 @@ struct TicTacToeGame {
     }
 
     void updatePlaying() {
-        if (cpuTurnPending) {
-            if (millis() >= turnDelayTimer) {
-                makeCpuMove();
-                cpuTurnPending = false;
-                int8_t line = -1;
-                uint8_t w = checkWinner(board, line);
-                if (w != 0) {
-                    endGame(w, line);
-                } else {
-                    playerTurn = true;
+        if (gameMode == TTT_MODE_1P) {
+            if (cpuTurnPending) {
+                if (millis() >= turnDelayTimer) {
+                    makeCpuMove();
+                    cpuTurnPending = false;
+                    int8_t line = -1;
+                    uint8_t w = checkWinner(board, line);
+                    if (w != 0) {
+                        endGame(w, line);
+                    } else {
+                        playerTurn = true;
+                    }
+                }
+                return;
+            }
+
+            if (!playerTurn) return;
+
+            // Botón 1 (GPIO 14): Mover cursor ARRIBA
+            if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+                if (cursorRow > 0) {
+                    cursorRow--;
+                    sound.tone(900, 15);
                 }
             }
-            return;
-        }
-
-        if (!playerTurn) return;
-
-        // Botón 1 (GPIO 14): Mover cursor ARRIBA
-        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
-            if (cursorRow > 0) {
-                cursorRow--;
-                sound.tone(900, 15);
-            }
-        }
-        // Botón 2 (GPIO 0): Mover cursor ABAJO
-        else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
-            if (cursorRow < 2) {
-                cursorRow++;
-                sound.tone(900, 15);
-            }
-        }
-        // Botón 3 (GPIO 7): Mover cursor DERECHA
-        else if (arduboy.justPressed(A_BUTTON)) {
-            if (cursorCol < 2) {
-                cursorCol++;
-                sound.tone(900, 15);
-            }
-        }
-        // Botón 4 (GPIO 18): Mover cursor IZQUIERDA
-        else if (arduboy.justPressed(B_BUTTON)) {
-            if (cursorCol > 0) {
-                cursorCol--;
-                sound.tone(900, 15);
-            }
-        }
-
-        // Selección / Colocación con botón BOOT (GPIO 9)
-        if (bootActionTriggered) {
-            if (board[cursorRow][cursorCol] == 0) {
-                board[cursorRow][cursorCol] = 1; // PLY ('X')
-                sound.tone(1200, 40);
-
-                int8_t line = -1;
-                uint8_t w = checkWinner(board, line);
-                if (w != 0) {
-                    endGame(w, line);
-                } else {
-                    playerTurn = false;
-                    cpuTurnPending = true;
-                    turnDelayTimer = millis() + 450;
+            // Botón 2 (GPIO 0): Mover cursor ABAJO
+            else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+                if (cursorRow < 2) {
+                    cursorRow++;
+                    sound.tone(900, 15);
                 }
-            } else {
-                // Tono de celda ocupada
-                sound.tone(400, 30);
+            }
+            // Botón 3 (GPIO 7): Mover cursor DERECHA
+            else if (arduboy.justPressed(A_BUTTON)) {
+                if (cursorCol < 2) {
+                    cursorCol++;
+                    sound.tone(900, 15);
+                }
+            }
+            // Botón 4 (GPIO 18): Mover cursor IZQUIERDA
+            else if (arduboy.justPressed(B_BUTTON)) {
+                if (cursorCol > 0) {
+                    cursorCol--;
+                    sound.tone(900, 15);
+                }
+            }
+
+            // Selección / Colocación con botón BOOT (GPIO 9)
+            if (bootActionTriggered) {
+                if (board[cursorRow][cursorCol] == 0) {
+                    board[cursorRow][cursorCol] = 1; // PLY ('X')
+                    sound.tone(1200, 40);
+
+                    int8_t line = -1;
+                    uint8_t w = checkWinner(board, line);
+                    if (w != 0) {
+                        endGame(w, line);
+                    } else {
+                        playerTurn = false;
+                        cpuTurnPending = true;
+                        turnDelayTimer = millis() + 450;
+                    }
+                } else {
+                    // Tono de celda ocupada
+                    sound.tone(400, 30);
+                }
+            }
+        } else {
+            // =========================================================
+            // MODO 2 JUGADORES (TURNOS ALTERNOS: P1 'X' / P2 'O')
+            // =========================================================
+            // Botón 1 (GPIO 14): Mover cursor ARRIBA
+            if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+                if (cursorRow > 0) {
+                    cursorRow--;
+                    sound.tone(900, 15);
+                }
+            }
+            // Botón 2 (GPIO 0): Mover cursor ABAJO
+            else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+                if (cursorRow < 2) {
+                    cursorRow++;
+                    sound.tone(900, 15);
+                }
+            }
+            // Botón 3 (GPIO 7): Mover cursor DERECHA
+            else if (arduboy.justPressed(A_BUTTON)) {
+                if (cursorCol < 2) {
+                    cursorCol++;
+                    sound.tone(900, 15);
+                }
+            }
+            // Botón 4 (GPIO 18): Mover cursor IZQUIERDA
+            else if (arduboy.justPressed(B_BUTTON)) {
+                if (cursorCol > 0) {
+                    cursorCol--;
+                    sound.tone(900, 15);
+                }
+            }
+
+            // Selección / Colocación con botón BOOT (GPIO 9)
+            if (bootActionTriggered) {
+                if (board[cursorRow][cursorCol] == 0) {
+                    board[cursorRow][cursorCol] = turnPlayer; // 1 ('X') o 2 ('O')
+                    sound.tone(1200, 40);
+
+                    int8_t line = -1;
+                    uint8_t w = checkWinner(board, line);
+                    if (w != 0) {
+                        endGame(w, line);
+                    } else {
+                        // Cambiar turno al otro jugador inmediatamente
+                        turnPlayer = (turnPlayer == 1) ? 2 : 1;
+                    }
+                } else {
+                    // Tono de celda ocupada
+                    sound.tone(400, 30);
+                }
             }
         }
     }
@@ -3686,20 +3783,39 @@ struct TicTacToeGame {
         winLineType = line;
         state = TTT_GAME_OVER;
 
-        if (winner == 1) {
-            // Victoria del Jugador
-            playerScore++;
-            triggerRgbLed(0, 255, 0, 1000); // LED Verde 1s
-            melodyPlayer.play(tttVictoryNotes, 4);
-        } else if (winner == 2) {
-            // Victoria de la CPU
-            cpuScore++;
-            triggerRgbLed(255, 0, 0, 1000); // LED Rojo 1s
-            melodyPlayer.play(tttDefeatNotes, 4);
+        if (gameMode == TTT_MODE_1P) {
+            if (winner == 1) {
+                // Victoria del Jugador
+                playerScore++;
+                triggerRgbLed(0, 255, 0, 1000); // LED Verde 1s
+                melodyPlayer.play(tttVictoryNotes, 4);
+            } else if (winner == 2) {
+                // Victoria de la CPU
+                cpuScore++;
+                triggerRgbLed(255, 0, 0, 1000); // LED Rojo 1s
+                melodyPlayer.play(tttDefeatNotes, 4);
+            } else {
+                // Empate
+                rgbLedWrite(RGB_LED_PIN, 0, 0, 0); // Apagado
+                sound.tone(440, 80);
+            }
         } else {
-            // Empate
-            rgbLedWrite(RGB_LED_PIN, 0, 0, 0); // Apagado
-            sound.tone(440, 80);
+            // MODO 2 JUGADORES
+            if (winner == 1) {
+                // Victoria Jugador 1
+                playerScore++;
+                triggerRgbLed(0, 255, 0, 1000); // LED Verde 1s
+                melodyPlayer.play(tttVictoryNotes, 4);
+            } else if (winner == 2) {
+                // Victoria Jugador 2
+                cpuScore++;
+                triggerRgbLed(0, 255, 255, 1000); // LED Azul/Verde (Cyan) 1s
+                melodyPlayer.play(tttVictoryNotes, 4);
+            } else {
+                // Empate
+                rgbLedWrite(RGB_LED_PIN, 0, 0, 0); // Apagado
+                sound.tone(440, 80);
+            }
         }
     }
 
@@ -3913,33 +4029,133 @@ struct TicTacToeGame {
     // RENDERING PIPELINE (PIXEL-PERFECT GRAPHICS & ISOMETRIC 3D)
     // =========================================================================
     void draw() {
-        drawHUD();
-
-        if (state == TTT_SELECT_DIFFICULTY) {
+        if (state == TTT_SELECT_MODE) {
+            drawModeSelect();
+        } else if (state == TTT_SELECT_DIFFICULTY) {
+            drawHUD();
             drawDifficultySelect();
         } else {
+            drawHUD();
             drawGameBoard();
         }
     }
 
     void drawHUD() {
-        // Caja Izquierda: PLY : [score]
-        arduboy.drawRoundRect(2, 1, 60, 11, 2, WHITE);
-        arduboy.setCursor(6, 3);
-        arduboy.print("PLY : ");
-        arduboy.print(playerScore);
-        for (int16_t x = 4; x <= 60; x += 2) {
-            arduboy.drawPixel(x, 13, WHITE);
+        if (gameMode == TTT_MODE_1P) {
+            // Caja Izquierda: PLY : [score]
+            if (state == TTT_PLAYING && playerTurn && !cpuTurnPending) {
+                arduboy.fillRoundRect(2, 1, 60, 11, 2, WHITE);
+                arduboy.setTextColor(BLACK);
+                arduboy.setCursor(6, 3);
+                arduboy.print("PLY : ");
+                arduboy.print(playerScore);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.drawRoundRect(2, 1, 60, 11, 2, WHITE);
+                arduboy.setCursor(6, 3);
+                arduboy.print("PLY : ");
+                arduboy.print(playerScore);
+            }
+            for (int16_t x = 4; x <= 60; x += 2) {
+                arduboy.drawPixel(x, 13, WHITE);
+            }
+
+            // Caja Derecha: CPU : [score]
+            if (state == TTT_PLAYING && cpuTurnPending) {
+                arduboy.fillRoundRect(66, 1, 60, 11, 2, WHITE);
+                arduboy.setTextColor(BLACK);
+                arduboy.setCursor(70, 3);
+                arduboy.print("CPU : ");
+                arduboy.print(cpuScore);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.drawRoundRect(66, 1, 60, 11, 2, WHITE);
+                arduboy.setCursor(70, 3);
+                arduboy.print("CPU : ");
+                arduboy.print(cpuScore);
+            }
+            for (int16_t x = 68; x <= 124; x += 2) {
+                arduboy.drawPixel(x, 13, WHITE);
+            }
+        } else {
+            // MODO 2 JUGADORES
+            // Caja Izquierda: P1 : [score]
+            if (state == TTT_PLAYING && turnPlayer == 1) {
+                arduboy.fillRoundRect(2, 1, 60, 11, 2, WHITE);
+                arduboy.setTextColor(BLACK);
+                arduboy.setCursor(6, 3);
+                arduboy.print("P1  : ");
+                arduboy.print(playerScore);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.drawRoundRect(2, 1, 60, 11, 2, WHITE);
+                arduboy.setCursor(6, 3);
+                arduboy.print("P1  : ");
+                arduboy.print(playerScore);
+            }
+            for (int16_t x = 4; x <= 60; x += 2) {
+                arduboy.drawPixel(x, 13, WHITE);
+            }
+
+            // Caja Derecha: P2 : [score]
+            if (state == TTT_PLAYING && turnPlayer == 2) {
+                arduboy.fillRoundRect(66, 1, 60, 11, 2, WHITE);
+                arduboy.setTextColor(BLACK);
+                arduboy.setCursor(70, 3);
+                arduboy.print("P2  : ");
+                arduboy.print(cpuScore);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.drawRoundRect(66, 1, 60, 11, 2, WHITE);
+                arduboy.setCursor(70, 3);
+                arduboy.print("P2  : ");
+                arduboy.print(cpuScore);
+            }
+            for (int16_t x = 68; x <= 124; x += 2) {
+                arduboy.drawPixel(x, 13, WHITE);
+            }
+        }
+    }
+
+    void drawModeSelect() {
+        // Cabecera estilizada
+        arduboy.fillRect(0, 0, 128, 11, WHITE);
+        arduboy.setTextColor(BLACK);
+        arduboy.setCursor(20, 2);
+        arduboy.print("TIC-TAC-TOE 3D");
+        arduboy.setTextColor(WHITE);
+
+        // Cuadrículas decorativas a los lados
+        drawDecorativeGrid(6, 18, true);
+        drawDecorativeGrid(98, 18, false);
+
+        // Opciones centrales: "1 PLAYER" y "2 PLAYERS"
+        const char* modeLabels[2] = {"1 PLAYER", "2 PLAYERS"};
+        static const int16_t optionY[2] = {20, 36};
+
+        for (uint8_t i = 0; i < 2; i++) {
+            int16_t y = optionY[i];
+            if (i == modeCursor) {
+                // Sombra sólida 3D
+                arduboy.fillRect(35, y + 2, 58, 12, WHITE);
+                // Bloque invertido (Fondo blanco, texto negro)
+                arduboy.fillRect(33, y, 58, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+                int16_t textX = 33 + (58 - strlen(modeLabels[i]) * 6) / 2;
+                arduboy.setCursor(textX, y + 2);
+                arduboy.print(modeLabels[i]);
+                arduboy.setTextColor(WHITE);
+            } else {
+                arduboy.drawRect(33, y, 58, 12, WHITE);
+                int16_t textX = 33 + (58 - strlen(modeLabels[i]) * 6) / 2;
+                arduboy.setCursor(textX, y + 2);
+                arduboy.print(modeLabels[i]);
+            }
         }
 
-        // Caja Derecha: CPU : [score]
-        arduboy.drawRoundRect(66, 1, 60, 11, 2, WHITE);
-        arduboy.setCursor(70, 3);
-        arduboy.print("CPU : ");
-        arduboy.print(cpuScore);
-        for (int16_t x = 68; x <= 124; x += 2) {
-            arduboy.drawPixel(x, 13, WHITE);
-        }
+        // Barra inferior de navegación
+        arduboy.setCursor(16, 56);
+        arduboy.print("B1/B2: Sel  BOOT: Ok");
     }
 
     void drawDifficultySelect() {
@@ -4017,7 +4233,13 @@ struct TicTacToeGame {
         static const int16_t Y_ROWS[4] = {18, 28, 40, 54};
 
         // 1. Resaltado de celda activa con dither de tablero de ajedrez
-        if (state == TTT_PLAYING && playerTurn && !cpuTurnPending) {
+        bool showCursor = false;
+        if (state == TTT_PLAYING) {
+            if (gameMode == TTT_MODE_1P && playerTurn && !cpuTurnPending) showCursor = true;
+            else if (gameMode == TTT_MODE_2P) showCursor = true;
+        }
+
+        if (showCursor) {
             int16_t yStart = Y_ROWS[cursorRow] + 1;
             int16_t yEnd = Y_ROWS[cursorRow + 1] - 1;
             for (int16_t y = yStart; y <= yEnd; y++) {
@@ -4077,13 +4299,23 @@ struct TicTacToeGame {
 
         // 7. Cartel de Game Over
         if (state == TTT_GAME_OVER) {
-            arduboy.fillRect(22, 22, 84, 18, BLACK);
-            arduboy.drawRect(22, 22, 84, 18, WHITE);
-            arduboy.drawRect(24, 24, 80, 14, WHITE);
-            arduboy.setCursor(34, 27);
-            if (winner == 1) arduboy.print("VICTORIA!");
-            else if (winner == 2) arduboy.print("DERROTA!");
-            else arduboy.print(" EMPATE! ");
+            arduboy.fillRect(20, 22, 88, 18, BLACK);
+            arduboy.drawRect(20, 22, 88, 18, WHITE);
+            arduboy.drawRect(22, 24, 84, 14, WHITE);
+            
+            const char* msg = "";
+            if (gameMode == TTT_MODE_1P) {
+                if (winner == 1) msg = "VICTORIA!";
+                else if (winner == 2) msg = "DERROTA!";
+                else msg = "EMPATE!";
+            } else {
+                if (winner == 1) msg = "GANA P1!";
+                else if (winner == 2) msg = "GANA P2!";
+                else msg = "EMPATE!";
+            }
+            int16_t textX = 22 + (84 - strlen(msg) * 6) / 2;
+            arduboy.setCursor(textX, 27);
+            arduboy.print(msg);
         }
     }
 
