@@ -339,6 +339,22 @@ public:
         drawBitmap(x, y, bitmap, w, h, color);
     }
 
+    void drawArduboyBitmap(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint8_t color = WHITE) {
+        int16_t pages = (h + 7) / 8;
+        for (int16_t p = 0; p < pages; p++) {
+            for (int16_t col = 0; col < w; col++) {
+                uint8_t byte = pgm_read_byte(bitmap + (p * w) + col);
+                for (uint8_t bit = 0; bit < 8; bit++) {
+                    if (p * 8 + bit < h) {
+                        if (byte & (1 << bit)) {
+                            drawPixel(x + col, y + p * 8 + bit, color);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // --- Text rendering ---
     void setCursor(int16_t x, int16_t y) {
         cursor_x = x;

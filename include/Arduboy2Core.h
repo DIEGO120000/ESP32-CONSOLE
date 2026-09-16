@@ -2,6 +2,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "EEPROM.h"
+#if defined(ESP32)
+#include "driver/gpio.h"
+#include "esp_rom_gpio.h"
+#endif
 
 // =============================================================================
 // ESP32-C6 SUPER MINI HARDWARE CONFIGURATION (Arduboy Compatibility Layer)
@@ -60,9 +64,19 @@ public:
         pinMode(ARDUBOY_PIN_BTN4, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
 
-        // 2. Initialize Audio Buzzer on GPIO 2
+        // 2. Initialize Audio Buzzer on GPIO 2 (Full isolation & pulldown clamp)
+        #if defined(ESP32)
+        ledcDetach(ARDUBOY_PIN_BUZZER);
+        esp_rom_gpio_pad_select_gpio((uint32_t)ARDUBOY_PIN_BUZZER);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BUZZER);
+        gpio_set_direction((gpio_num_t)ARDUBOY_PIN_BUZZER, GPIO_MODE_OUTPUT);
+        gpio_pullup_dis((gpio_num_t)ARDUBOY_PIN_BUZZER);
+        gpio_pulldown_en((gpio_num_t)ARDUBOY_PIN_BUZZER);
+        gpio_set_level((gpio_num_t)ARDUBOY_PIN_BUZZER, 0);
+        #else
         pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
-        noTone(ARDUBOY_PIN_BUZZER);
+        digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
+        #endif
 
         // 3. Initialize I2C bus at 400kHz (SDA=19, SCL=20)
         Wire.begin(ARDUBOY_PIN_SDA, ARDUBOY_PIN_SCL);
@@ -120,6 +134,7 @@ public:
     static void display() {
         // Universal Page-by-Page Rendering (Compatible with 100% of SSD1306, SH1106, SSD1309, SSD1315)
         for (uint8_t page = 0; page < 8; page++) {
+            yield();
             Wire.beginTransmission(i2cAddress);
             Wire.write(0x00);
             Wire.write(0xB0 + page); // Set page address (0 to 7)
@@ -135,6 +150,7 @@ public:
                 Wire.endTransmission();
             }
         }
+        yield();
     }
 
     static void clear() {
