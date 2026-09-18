@@ -6112,24 +6112,9 @@ struct TrisGame {
     void drawCell(int16_t bx, int16_t by, uint8_t type) {
         if (type == 0) return;
         arduboy.fillRect(bx, by, 4, 4, BLACK);
-        if (type == 2) { // O piece: concentric square
-            arduboy.drawPixel(bx + 1, by + 1, WHITE);
-            arduboy.drawPixel(bx + 2, by + 1, WHITE);
-            arduboy.drawPixel(bx + 1, by + 2, WHITE);
-            arduboy.drawPixel(bx + 2, by + 2, WHITE);
-        } else if (type == 3 || type == 4 || type == 5) { // T, S, Z: checkerboard dither
-            for (int dy = 0; dy < 4; dy++) {
-                for (int dx = 0; dx < 4; dx++) {
-                    if ((bx + dx + by + dy) % 2 == 0) {
-                        arduboy.drawPixel(bx + dx, by + dy, WHITE);
-                    }
-                }
-            }
-        } else { // I, J, L: domino bevel dots
-            arduboy.drawPixel(bx + 1, by + 1, WHITE);
-            arduboy.drawPixel(bx + 2, by + 1, WHITE);
-            arduboy.drawPixel(bx + 1, by + 2, WHITE);
-        }
+        arduboy.drawPixel(bx + 1, by + 1, WHITE);
+        arduboy.drawPixel(bx + 2, by + 1, WHITE);
+        arduboy.drawPixel(bx + 1, by + 2, WHITE);
     }
 
     void drawWell() {
@@ -6142,7 +6127,7 @@ struct TrisGame {
             }
 
             if (isClearingRow && flashState) {
-                arduboy.fillRect(49, 2 + (r - 5) * 4, 38, 4, BLACK);
+                arduboy.fillRect(49, 2 + (r - 5) * 4, 40, 4, BLACK);
                 continue;
             }
 
