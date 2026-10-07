@@ -3,14 +3,14 @@
 #include <Wire.h>
 #include "EEPROM.h"
 
-// Hardware Pin Configuration for ESP32-C3 Super Mini
-#define ARDUBOY_PIN_SDA        3
-#define ARDUBOY_PIN_SCL        4
+// Hardware Pin Configuration for ESP32-C6
+#define ARDUBOY_PIN_SDA        7
+#define ARDUBOY_PIN_SCL        6
 
-#define ARDUBOY_PIN_BTN1       2    // Left (or Up in combos)
-#define ARDUBOY_PIN_BTN2       1    // Right (or Down in combos)
-#define ARDUBOY_PIN_BTN3       0    // Button A (Action)
-#define ARDUBOY_PIN_BTN4       5    // Button B (Menu)
+#define ARDUBOY_PIN_BTN1       20   // UP
+#define ARDUBOY_PIN_BTN2       19   // DOWN
+#define ARDUBOY_PIN_BTN3       13   // CLICK (Action A)
+#define ARDUBOY_PIN_BTN4       18   // LEFT (Action B)
 
 #define OLED_ADDR              0x3C
 #define SCREEN_WIDTH           128

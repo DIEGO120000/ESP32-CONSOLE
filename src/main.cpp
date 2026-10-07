@@ -1,11 +1,13 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_sleep.h>
+#include <Preferences.h>
 #include "Arduboy2.h"
 #include "ArduboyTones.h"
 #include "ProyectoBLE.h"
 #include "braindu_bitmaps.h"
 #include "hangman_words.h"
+#include "MathChallenge.h"
 
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
@@ -2709,18 +2711,27 @@ struct Game2048 {
         melodyPlayer.stop();
         memset(board, 0, sizeof(board));
         currentScore = 0;
-        highScore = 0;
         gameOver = false;
         won2048 = false;
         winBannerTimer = 0;
 
         Preferences prefs;
-        prefs.begin("game2048", true);
-        highScore = prefs.getUInt("2048_hi", 0);
+        prefs.begin("2048_data", true);
+        highScore = prefs.getUInt("hi_score", 0);
         prefs.end();
 
         spawnTile();
         spawnTile();
+    }
+
+    void saveHighScore() {
+        Preferences prefs;
+        prefs.begin("2048_data", false);
+        uint32_t savedHi = prefs.getUInt("hi_score", 0);
+        if (highScore > savedHi) {
+            prefs.putUInt("hi_score", highScore);
+        }
+        prefs.end();
     }
 
     void spawnTile() {
@@ -2833,10 +2844,7 @@ struct Game2048 {
         currentScore += scoreGained;
         if (currentScore > highScore) {
             highScore = currentScore;
-            Preferences prefs;
-            prefs.begin("game2048", false);
-            prefs.putUInt("2048_hi", highScore);
-            prefs.end();
+            saveHighScore();
         }
 
         // Bip de confirmación de movimiento en buzzer
@@ -2887,6 +2895,7 @@ struct Game2048 {
         // Fin de partida
         gameOver = true;
         sound.tone(220, 150);
+        saveHighScore();
     }
 
     void update() {
@@ -5089,8 +5098,8 @@ struct BrainduTrainGame {
 struct HangmanGame {
     uint8_t mode;
     bool paused;
-    uint16_t wins;
-    uint16_t losses;
+    uint32_t wins;
+    uint32_t losses;
     uint8_t soundEnabled;
     uint8_t hangman;
     static const uint8_t HISTORY_CAPACITY = 20;
@@ -5130,36 +5139,33 @@ struct HangmanGame {
     }
 
     void loadStats() {
-        uint8_t h1 = EEPROM.read(50);
-        uint8_t h2 = EEPROM.read(51);
-        if (h1 != 'H' || h2 != 'M') {
-            EEPROM.write(50, 'H');
-            EEPROM.write(51, 'M');
-            wins = 0;
-            losses = 0;
-            soundEnabled = 1;
-            saveStats();
-        } else {
-            EEPROM.get(52, wins);
-            EEPROM.get(54, losses);
-            soundEnabled = EEPROM.read(56);
-            if (soundEnabled > 1) soundEnabled = 1;
-        }
+        Preferences prefs;
+        prefs.begin("hangman_nvs", true);
+        wins = prefs.getUInt("wins", 0);
+        losses = prefs.getUInt("losses", 0);
+        soundEnabled = prefs.getUChar("sound", 1);
+        prefs.end();
+        if (soundEnabled > 1) soundEnabled = 1;
     }
 
     void saveStats() {
-        EEPROM.write(50, 'H');
-        EEPROM.write(51, 'M');
-        EEPROM.put(52, wins);
-        EEPROM.put(54, losses);
-        EEPROM.write(56, soundEnabled);
-        EEPROM.commit();
+        Preferences prefs;
+        prefs.begin("hangman_nvs", false);
+        prefs.putUInt("wins", wins);
+        prefs.putUInt("losses", losses);
+        prefs.putUChar("sound", soundEnabled);
+        prefs.end();
     }
 
     void resetStats() {
         wins = 0;
         losses = 0;
-        saveStats();
+        Preferences prefs;
+        prefs.begin("hangman_nvs", false);
+        prefs.putUInt("wins", 0);
+        prefs.putUInt("losses", 0);
+        prefs.putUChar("sound", soundEnabled);
+        prefs.end();
     }
 
     void playTone(uint16_t freq, uint16_t dur) {
@@ -5178,7 +5184,10 @@ struct HangmanGame {
             sound.tone(1200, 60);
             delay(80);
         }
-        saveStats();
+        Preferences prefs;
+        prefs.begin("hangman_nvs", false);
+        prefs.putUChar("sound", soundEnabled);
+        prefs.end();
     }
 
     void startPlaying() {
@@ -5244,7 +5253,10 @@ struct HangmanGame {
         if (allDone) {
             mode = HANGMAN_MODE_CORRECT;
             wins++;
-            saveStats();
+            Preferences prefs;
+            prefs.begin("hangman_nvs", false);
+            prefs.putUInt("wins", wins);
+            prefs.end();
             triggerRgbLed(0, 255, 0, 1000); // LED Verde 1s
             if (soundEnabled) {
                 melodyPlayer.play(hangmanVictoryNotes, 3);
@@ -5257,7 +5269,10 @@ struct HangmanGame {
                 hangman = 6;
                 mode = HANGMAN_MODE_DEAD;
                 losses++;
-                saveStats();
+                Preferences prefs;
+                prefs.begin("hangman_nvs", false);
+                prefs.putUInt("losses", losses);
+                prefs.end();
                 triggerRgbLed(255, 0, 0, 1000); // LED Rojo 1s
                 if (soundEnabled) {
                     melodyPlayer.play(hangmanDefeatNotes, 4);
@@ -6199,6 +6214,8 @@ struct TrisGame {
     }
 } trisGame;
 
+MathChallengeGame mathChallenge;
+
 
 
 // =============================================================================
@@ -6219,7 +6236,8 @@ enum SystemState {
     STATE_TIC_TAC_TOE,
     STATE_BRAINDU_TRAIN,
     STATE_HANGMAN,
-    STATE_TRIS
+    STATE_TRIS,
+    STATE_MATH_CHALLENGE
 };
 
 SystemState currentState = STATE_MENU;
@@ -6238,9 +6256,10 @@ const char* menuItems[] = {
     "11. Tic-Tac-Toe",
     "12. BrainduTrain",
     "13. Hangman",
-    "14. TRIS"
+    "14. TRIS",
+    "15. Math Challenge"
 };
-const uint8_t MENU_COUNT = 14;
+const uint8_t MENU_COUNT = 15;
 
 
 // System Pause & Power Management State
@@ -6256,6 +6275,10 @@ unsigned long lastActivityTime = 0;
 void enterDeepSleep(const char* message = "APAGANDO...") {
     if (currentState == STATE_PROYECTO_BLE) {
         proyectoBLE.stop();
+    } else if (currentState == STATE_2048) {
+        game2048.saveHighScore();
+    } else if (currentState == STATE_MATH_CHALLENGE) {
+        mathChallenge.saveHighScore();
     }
     melodyPlayer.stop();
     arduboy.clear();
@@ -6342,7 +6365,7 @@ void setup() {
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
-    // Boot Arduboy2 Core (OLED on SDA=19, SCL=20 | Buttons: B1=14, B2=0, B3=7, B4=18 | BOOT=9 | Buzzer=2)
+    // Boot Arduboy2 Core (OLED SSD1309 on SDA=7, SCL=6 | D-Pad: UP=20, DOWN=19, LEFT=18, RIGHT=15, CLICK=13 | BOOT=9 | Buzzer=2)
     arduboy.begin();
     arduboy.setFrameRate(60);
 
@@ -6352,7 +6375,7 @@ void setup() {
     sound.tone(1760, 60); delay(70);
     sound.noTone();
 
-    Serial.println("[ESP32-C6] Retro Console Ready (Buzzer=GPIO2, B1=GPIO14, B2=GPIO0, B3=GPIO7, B4=GPIO18, BOOT=GPIO9, Standby=90s)!");
+    Serial.println("[ESP32-C6] Retro Console Ready (Buzzer=GPIO2, UP=GPIO20, DOWN=GPIO19, LEFT=GPIO18, RIGHT=GPIO15, CLICK=GPIO13, BOOT=GPIO9, Standby=90s)!");
 }
 
 void loop() {
@@ -6368,14 +6391,15 @@ void loop() {
     if (isScreenSleeping) {
         melodyPlayer.stop();
         sound.noTone();
-        // En reposo: omitir renderizado y físicas; monitorizar los 5 botones (14, 0, 7, 18, 9)
-        bool btn1 = (digitalRead(ARDUBOY_PIN_BTN1) == LOW); // GPIO 14
-        bool btn2 = (digitalRead(ARDUBOY_PIN_BTN2) == LOW); // GPIO 0
-        bool btn3 = (digitalRead(ARDUBOY_PIN_BTN3) == LOW); // GPIO 7
-        bool btn4 = (digitalRead(ARDUBOY_PIN_BTN4) == LOW); // GPIO 18
-        bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW); // GPIO 9
+        // En reposo: omitir renderizado y físicas; monitorizar los 5 botones del D-Pad + BOOT
+        bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // GPIO 20
+        bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);   // GPIO 19
+        bool btnLeft = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);   // GPIO 18
+        bool btnRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW); // GPIO 15
+        bool btnClick = (digitalRead(ARDUBOY_PIN_CLICK) == LOW); // GPIO 13
+        bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);      // GPIO 9
 
-        if (btn1 || btn2 || btn3 || btn4 || boot) {
+        if (btnUp || btnDown || btnLeft || btnRight || btnClick || boot) {
             // Despertar inmediato: Encender panel OLED y refrescar pantalla
             Arduboy2Core::sendCommand(SSD1306_DISPLAYON);
             arduboy.display();
@@ -6417,6 +6441,8 @@ void loop() {
                     hangmanGame.onBootShortPress();
                 } else if (currentState == STATE_TRIS) {
                     trisGame.onBootShortPress();
+                } else if (currentState == STATE_MATH_CHALLENGE) {
+                    mathChallenge.onBootShortPress();
                 } else if (currentState != STATE_MENU) {
                     gamePaused = !gamePaused;
                     if (gamePaused) {
@@ -6469,6 +6495,10 @@ void loop() {
             } else if (millis() - exitComboStart >= 450) {
                 if (currentState == STATE_PROYECTO_BLE) {
                     proyectoBLE.stop();
+                } else if (currentState == STATE_2048) {
+                    game2048.saveHighScore();
+                } else if (currentState == STATE_MATH_CHALLENGE) {
+                    mathChallenge.saveHighScore();
                 }
                 melodyPlayer.stop();
                 sound.tone(600, 30);
@@ -6547,6 +6577,7 @@ void loop() {
                 else if (menuCursor == 11) { brainduTrain.init(); currentState = STATE_BRAINDU_TRAIN; }
                 else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
                 else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
+                else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
             }
             break;
         }
@@ -6619,6 +6650,15 @@ void loop() {
         case STATE_TRIS:
             if (!gamePaused) trisGame.update();
             trisGame.draw();
+            break;
+
+        case STATE_MATH_CHALLENGE:
+            if (!gamePaused) mathChallenge.update();
+            mathChallenge.draw();
+            if (mathChallenge.exitRequested) {
+                mathChallenge.exitRequested = false;
+                currentState = STATE_MENU;
+            }
             break;
     }
 

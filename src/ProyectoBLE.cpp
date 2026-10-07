@@ -127,7 +127,7 @@ void ProyectoBLEClass::update() {
 
   bool modeChanged = false;
 
-  // Alternar entre modos Android e iPhone EXCLUSIVAMENTE con el Botón 3 físico (GPIO 7 -> A_BUTTON)
+  // Alternar entre modos Android e iPhone con Pulsación Central (CLICK - GPIO 13 -> A_BUTTON)
   if (arduboy.justPressed(A_BUTTON)) {
     nextMode();
     modeChanged = true;

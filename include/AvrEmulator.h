@@ -3,18 +3,18 @@
 #include <Wire.h>
 #include "EEPROM.h"
 
-// Hardware Pin Configuration for ESP32-C3 Super Mini
-#define ARDUBOY_PIN_SDA        3    // OLED SDA
-#define ARDUBOY_PIN_SCL        4    // OLED SCL
+// Hardware Pin Configuration for ESP32-C6
+#define ARDUBOY_PIN_SDA        7    // OLED SDA -> GPIO 7
+#define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
-#define ARDUBOY_PIN_UP         2    // D-Pad UP
-#define ARDUBOY_PIN_DOWN       1    // D-Pad DOWN
-#define ARDUBOY_PIN_LEFT       0    // D-Pad LEFT
-#define ARDUBOY_PIN_RIGHT      5    // D-Pad RIGHT
-#define ARDUBOY_PIN_A          8    // Button A
-#define ARDUBOY_PIN_B          9    // Button B
+#define ARDUBOY_PIN_UP         20   // D-Pad UP    -> GPIO 20
+#define ARDUBOY_PIN_DOWN       19   // D-Pad DOWN  -> GPIO 19
+#define ARDUBOY_PIN_LEFT       18   // D-Pad LEFT  -> GPIO 18
+#define ARDUBOY_PIN_RIGHT      15   // D-Pad RIGHT -> GPIO 15
+#define ARDUBOY_PIN_A          13   // Central CLICK / Button A -> GPIO 13
+#define ARDUBOY_PIN_B          9    // Button B / BOOT -> GPIO 9
 
-#define ARDUBOY_PIN_BUZZER     20   // Audio Speaker on GPIO 20
+#define ARDUBOY_PIN_BUZZER     2    // Audio Speaker on GPIO 2
 
 #define OLED_ADDR              0x3C
 #define SCREEN_WIDTH           128

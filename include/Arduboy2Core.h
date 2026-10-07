@@ -8,21 +8,36 @@
 #endif
 
 // =============================================================================
-// ESP32-C6 SUPER MINI HARDWARE CONFIGURATION (Arduboy Compatibility Layer)
+// ESP32-C6 HARDWARE CONFIGURATION (Arduboy HAL - OLED SSD1309 2.42" & D-Pad)
 // =============================================================================
-#define ARDUBOY_PIN_SDA        19   // OLED SDA -> GPIO 19
-#define ARDUBOY_PIN_SCL        20   // OLED SCL -> GPIO 20
+// I2C OLED Display Communication (SSD1309 / SSD1306 2.42", 128x64 @ 400kHz)
+#define ARDUBOY_PIN_SDA        7    // OLED SDA -> GPIO 7
+#define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
-// 4 Physical Buttons (Active LOW with INPUT_PULLUP)
-#define ARDUBOY_PIN_BTN1       14   // Button 1 (Left / Up)     -> GPIO 14
-#define ARDUBOY_PIN_BTN2       0    // Button 2 (Right / Down)  -> GPIO 0
-#define ARDUBOY_PIN_BTN3       7    // Button 3 (Action A / Ok) -> GPIO 7
-#define ARDUBOY_PIN_BTN4       18   // Button 4 (Action B / Alt)-> GPIO 18
+// 5-Way Mechanical Digital D-Pad Pins (Active LOW with INPUT_PULLUP)
+#define PIN_UP                 20   // Dirección 1 (UP)    -> GPIO 20
+#define PIN_DOWN               19   // Dirección 2 (DOWN)  -> GPIO 19
+#define PIN_LEFT               18   // Dirección 3 (LEFT)  -> GPIO 18
+#define PIN_RIGHT              15   // Dirección 4 (RIGHT) -> GPIO 15
+#define PIN_CLICK              13   // Pulsación Central (CLICK) -> GPIO 13
+
+// Centralized Pin Constants
+#define ARDUBOY_PIN_UP         PIN_UP
+#define ARDUBOY_PIN_DOWN       PIN_DOWN
+#define ARDUBOY_PIN_LEFT       PIN_LEFT
+#define ARDUBOY_PIN_RIGHT      PIN_RIGHT
+#define ARDUBOY_PIN_CLICK      PIN_CLICK
+
+// Legacy / compatibility aliases
+#define ARDUBOY_PIN_BTN1       ARDUBOY_PIN_UP
+#define ARDUBOY_PIN_BTN2       ARDUBOY_PIN_DOWN
+#define ARDUBOY_PIN_BTN3       ARDUBOY_PIN_LEFT
+#define ARDUBOY_PIN_BTN4       ARDUBOY_PIN_RIGHT
 
 // BOOT Button (Integrated on-board ESP32-C6)
 #define ARDUBOY_PIN_BOOT       9    // BOOT Button -> GPIO 9 (Active LOW, internal pullup)
 
-// Audio Buzzer Output (Pin + del buzzer conectado a GPIO 2)
+// Audio Buzzer Output (Speaker connected to GPIO 2)
 #define ARDUBOY_PIN_BUZZER     2    // Speaker/Buzzer -> GPIO 2
 
 // Arduboy Button Bitmasks
@@ -43,7 +58,7 @@
 #define WHITE                  1
 #define BLACK                  0
 
-// SSD1306 / SH1106 Display Commands
+// SSD1306 / SSD1309 Display Commands
 #define SSD1306_I2C_ADDR       0x3C
 #define SSD1306_DISPLAYOFF     0xAE
 #define SSD1306_DISPLAYON      0xAF
@@ -57,11 +72,12 @@ public:
 
 public:
     static void boot() {
-        // 1. Initialize all 4 Hardware Buttons with INPUT_PULLUP
-        pinMode(ARDUBOY_PIN_BTN1, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_BTN2, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_BTN3, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_BTN4, INPUT_PULLUP);
+        // 1. Initialize all 5 D-Pad Directions and BOOT Button with INPUT_PULLUP
+        pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_DOWN, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_RIGHT, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_CLICK, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
 
         // 2. Initialize Audio Buzzer on GPIO 2 (Full isolation & pulldown clamp)
@@ -78,9 +94,9 @@ public:
         digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
         #endif
 
-        // 3. Initialize I2C bus at 400kHz (SDA=19, SCL=20)
+        // 3. Initialize I2C bus at 400kHz (SDA=7, SCL=6)
         Wire.begin(ARDUBOY_PIN_SDA, ARDUBOY_PIN_SCL);
-        Wire.setClock(400000);
+        Wire.setClock(400000UL);
         delay(50);
 
         // Auto-detect I2C Address (0x3C or 0x3D)
@@ -91,7 +107,7 @@ public:
             i2cAddress = 0x3D;
         }
 
-        // 4. Initialize OLED Display (Universal Dual SSD1306 / SH1106 Sequence)
+        // 4. Initialize OLED Display (Universal Dual SSD1306 / SSD1309 / SH1106 Sequence)
         initDisplay();
 
         // 5. Initialize EEPROM persistence
@@ -116,7 +132,7 @@ public:
         Wire.write(0xA8); Wire.write(0x3F); // Multiplex 64
         Wire.write(0xD3); Wire.write(0x00); // Display Offset 0
         Wire.write(0x40);                   // Start Line 0
-        Wire.write(0x8D); Wire.write(0x14); // Enable Charge Pump (SSD1306)
+        Wire.write(0x8D); Wire.write(0x14); // Enable Charge Pump (SSD1306/SSD1309)
         Wire.write(0xAD); Wire.write(0x8B); // Enable DC-DC Converter (SH1106)
         Wire.write(0xA1);                   // Segment Remap (Column 127 = SEG0)
         Wire.write(0xC8);                   // COM Output Scan Decrement
@@ -132,7 +148,7 @@ public:
     }
 
     static void display() {
-        // Universal Page-by-Page Rendering (Compatible with 100% of SSD1306, SH1106, SSD1309, SSD1315)
+        // Universal Page-by-Page Rendering (Compatible with SSD1306, SSD1309, SH1106, SSD1315)
         for (uint8_t page = 0; page < 8; page++) {
             yield();
             Wire.beginTransmission(i2cAddress);
@@ -166,17 +182,19 @@ public:
     }
 
     static uint8_t buttonsState() {
-        // Read 4 hardware buttons (Active LOW with pullups)
-        bool b1 = (digitalRead(ARDUBOY_PIN_BTN1) == LOW); // GPIO 14 (Left / Up)
-        bool b2 = (digitalRead(ARDUBOY_PIN_BTN2) == LOW); // GPIO 0  (Right / Down)
-        bool b3 = (digitalRead(ARDUBOY_PIN_BTN3) == LOW); // GPIO 7  (Action A / Select)
-        bool b4 = (digitalRead(ARDUBOY_PIN_BTN4) == LOW); // GPIO 18 (Action B / Back)
+        // Read 5-Way D-Pad (Active LOW with pullups)
+        bool bUp    = (digitalRead(ARDUBOY_PIN_UP) == LOW);    // GPIO 20 (UP)
+        bool bDown  = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);  // GPIO 19 (DOWN)
+        bool bLeft  = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);  // GPIO 18 (LEFT)
+        bool bRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW); // GPIO 15 (RIGHT)
+        bool bClick = (digitalRead(ARDUBOY_PIN_CLICK) == LOW); // GPIO 13 (CLICK / Center)
 
         uint8_t btnMask = 0;
-        if (b1) btnMask |= (LEFT_BUTTON | UP_BUTTON);
-        if (b2) btnMask |= (RIGHT_BUTTON | DOWN_BUTTON);
-        if (b3) btnMask |= A_BUTTON;
-        if (b4) btnMask |= B_BUTTON;
+        if (bUp)    btnMask |= UP_BUTTON;
+        if (bDown)  btnMask |= DOWN_BUTTON;
+        if (bLeft)  btnMask |= LEFT_BUTTON;
+        if (bRight) btnMask |= RIGHT_BUTTON;
+        if (bClick) btnMask |= A_BUTTON;
 
         return btnMask;
     }
