@@ -16,11 +16,12 @@ while true; do
         # Give permission if needed
         sudo chmod 666 "$PORT" 2>/dev/null || true
         
-        /home/diego/.platformio/penv/bin/esptool.py --chip esp32c6 --port "$PORT" --baud 921600 \
+        /home/diego/.platformio/penv/bin/esptool --chip esp32c6 --port "$PORT" --baud 460800 \
             --before default_reset --after hard_reset write_flash -z \
             --flash_mode dio --flash_freq 80m --flash_size detect \
             0x0000 .pio/build/esp32c6_super_mini/bootloader.bin \
             0x8000 .pio/build/esp32c6_super_mini/partitions.bin \
+            0xe000 /home/diego/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
             0x10000 .pio/build/esp32c6_super_mini/firmware.bin
         
         EXIT_CODE=$?

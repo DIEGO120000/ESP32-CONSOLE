@@ -7,8 +7,8 @@
 #define ARDUBOY_PIN_SDA        7    // OLED SDA -> GPIO 7
 #define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
-#define ARDUBOY_PIN_UP         20   // D-Pad UP    -> GPIO 20
-#define ARDUBOY_PIN_DOWN       19   // D-Pad DOWN  -> GPIO 19
+#define ARDUBOY_PIN_UP         19   // D-Pad UP    -> GPIO 19
+#define ARDUBOY_PIN_DOWN       20   // D-Pad DOWN  -> GPIO 20
 #define ARDUBOY_PIN_LEFT       18   // D-Pad LEFT  -> GPIO 18
 #define ARDUBOY_PIN_RIGHT      15   // D-Pad RIGHT -> GPIO 15
 #define ARDUBOY_PIN_A          13   // Central CLICK / Button A -> GPIO 13

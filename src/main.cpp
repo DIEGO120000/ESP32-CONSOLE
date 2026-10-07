@@ -6326,8 +6326,8 @@ void setup() {
 
     // 1. Configuración explícita de hardware (Cruceta 5 vías + Click + BOOT)
     pinMode(13, INPUT_PULLUP);                 // GPIO 13 -> Click Central (Confirmación / OK)
-    pinMode(PIN_UP, INPUT_PULLUP);             // GPIO 20 -> UP
-    pinMode(PIN_DOWN, INPUT_PULLUP);           // GPIO 19 -> DOWN
+    pinMode(PIN_UP, INPUT_PULLUP);             // GPIO 19 -> UP
+    pinMode(PIN_DOWN, INPUT_PULLUP);           // GPIO 20 -> DOWN
     pinMode(PIN_LEFT, INPUT_PULLUP);           // GPIO 18 -> LEFT
     pinMode(PIN_RIGHT, INPUT_PULLUP);          // GPIO 15 -> RIGHT
     pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);   // GPIO 9  -> BOOT Button
@@ -6572,12 +6572,12 @@ void loop() {
             arduboy.setCursor(2, 57);
             arduboy.print("B1/B2:Mover  B3:Jugar");
 
-            if (arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(UP_BUTTON)) {
+            if (arduboy.justPressed(UP_BUTTON)) {
                 sound.tone(880, 15);
                 menuCursor--;
                 if (menuCursor < 0) menuCursor = MENU_COUNT - 1;
             }
-            if (arduboy.justPressed(RIGHT_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+            if (arduboy.justPressed(DOWN_BUTTON)) {
                 sound.tone(700, 15);
                 menuCursor++;
                 if (menuCursor >= MENU_COUNT) menuCursor = 0;

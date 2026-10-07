@@ -175,12 +175,12 @@ struct MathChallengeGame {
         playerSelection = -1;
 
         // Fixed 1:1 hardware button mapping (4 D-Pad directions):
-        // Direction 1 (UP - GPIO 20)    -> Recuadro [1] (options[0])
-        // Direction 2 (DOWN - GPIO 19)  -> Recuadro [2] (options[1])
+        // Direction 1 (UP - GPIO 19)    -> Recuadro [1] (options[0])
+        // Direction 2 (DOWN - GPIO 20)  -> Recuadro [2] (options[1])
         // Direction 3 (LEFT - GPIO 18)  -> Recuadro [3] (options[2])
         // Direction 4 (RIGHT - GPIO 15) -> Recuadro [4] (options[3])
-        buttons[0].pin = ARDUBOY_PIN_UP;    // GPIO 20
-        buttons[1].pin = ARDUBOY_PIN_DOWN;  // GPIO 19
+        buttons[0].pin = ARDUBOY_PIN_UP;    // GPIO 19
+        buttons[1].pin = ARDUBOY_PIN_DOWN;  // GPIO 20
         buttons[2].pin = ARDUBOY_PIN_LEFT;  // GPIO 18
         buttons[3].pin = ARDUBOY_PIN_RIGHT; // GPIO 15
         resetInputs();

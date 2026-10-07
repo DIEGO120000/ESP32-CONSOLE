@@ -7,8 +7,8 @@
 #define ARDUBOY_PIN_SDA        7
 #define ARDUBOY_PIN_SCL        6
 
-#define ARDUBOY_PIN_BTN1       20   // UP
-#define ARDUBOY_PIN_BTN2       19   // DOWN
+#define ARDUBOY_PIN_BTN1       19   // UP -> GPIO 19
+#define ARDUBOY_PIN_BTN2       20   // DOWN -> GPIO 20
 #define ARDUBOY_PIN_BTN3       13   // CLICK (Action A)
 #define ARDUBOY_PIN_BTN4       18   // LEFT (Action B)
 

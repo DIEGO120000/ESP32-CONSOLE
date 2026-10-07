@@ -15,8 +15,8 @@
 #define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
 // 5-Way Mechanical Digital D-Pad Pins (Active LOW with INPUT_PULLUP)
-#define PIN_UP                 20   // Dirección 1 (UP)    -> GPIO 20
-#define PIN_DOWN               19   // Dirección 2 (DOWN)  -> GPIO 19
+#define PIN_UP                 19   // Dirección 1 (UP)    -> GPIO 19
+#define PIN_DOWN               20   // Dirección 2 (DOWN)  -> GPIO 20
 #define PIN_LEFT               18   // Dirección 3 (LEFT)  -> GPIO 18
 #define PIN_RIGHT              15   // Dirección 4 (RIGHT) -> GPIO 15
 #define PIN_CLICK              13   // Pulsación Central (CLICK) -> GPIO 13
@@ -192,7 +192,7 @@ public:
         if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)  raw |= DOWN_BUTTON;
         if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)  raw |= LEFT_BUTTON;
         if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW) raw |= RIGHT_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_CLICK) == LOW) raw |= (A_BUTTON | B_BUTTON); // Universal OK / Confirm
+        if (digitalRead(ARDUBOY_PIN_CLICK) == LOW) raw |= A_BUTTON; // EXCLUSIVAMENTE A_BUTTON (Enter / Select)
 
         uint32_t now = millis();
         if (raw != lastRawState) {
