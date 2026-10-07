@@ -6376,6 +6376,13 @@ void setup() {
     Serial.begin(115200);
     delay(50);
 
+    // Desvinculación explícita de USB CDC / JTAG en GPIO 19 y 20 y configuración de los 5 pines de cruceta como INPUT_PULLUP
+    const uint8_t dpadPins[5] = {20, 19, 18, 15, 13};
+    for (uint8_t p : dpadPins) {
+        gpio_reset_pin((gpio_num_t)p);
+        pinMode(p, INPUT_PULLUP);
+    }
+
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
@@ -6432,8 +6439,8 @@ void loop() {
         melodyPlayer.stop();
         sound.noTone();
         // En reposo: omitir renderizado y físicas; monitorizar los 5 botones del D-Pad + BOOT
-        bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // GPIO 20
-        bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);   // GPIO 19
+        bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // GPIO 19
+        bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);   // GPIO 20
         bool btnLeft = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);   // GPIO 18
         bool btnRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW); // GPIO 15
         bool btnClick = (digitalRead(ARDUBOY_PIN_CLICK) == LOW); // GPIO 13
