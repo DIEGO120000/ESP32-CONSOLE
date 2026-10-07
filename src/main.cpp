@@ -6324,13 +6324,14 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 void setup() {
     sound.noTone();
 
-    // 1. Configuración explícita de hardware (Cruceta 5 vías + Click + BOOT)
-    pinMode(13, INPUT_PULLUP);                 // GPIO 13 -> Click Central (Confirmación / OK)
-    pinMode(PIN_UP, INPUT_PULLUP);             // GPIO 19 -> UP
-    pinMode(PIN_DOWN, INPUT_PULLUP);           // GPIO 20 -> DOWN
-    pinMode(PIN_LEFT, INPUT_PULLUP);           // GPIO 18 -> LEFT
-    pinMode(PIN_RIGHT, INPUT_PULLUP);          // GPIO 15 -> RIGHT
-    pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);   // GPIO 9  -> BOOT Button
+    // 1. Desvinculación de JTAG/SPI/Matrix y Configuración explícita (Cruceta 5 vías + BOOT)
+    const uint8_t diagPins[5] = {20, 19, 18, 15, 13};
+    for (uint8_t i = 0; i < 5; i++) {
+        gpio_reset_pin((gpio_num_t)diagPins[i]);
+        pinMode(diagPins[i], INPUT_PULLUP);
+    }
+    gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
+    pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
 
     // 2. Forzar explícitamente el estado global al MENÚ PRINCIPAL
     currentState = STATE_MENU;
@@ -6378,7 +6379,7 @@ void setup() {
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
-    // Boot Arduboy2 Core (OLED SSD1309 on SDA=7, SCL=6 | D-Pad: UP=20, DOWN=19, LEFT=18, RIGHT=15, CLICK=13 | BOOT=9 | Buzzer=2)
+    // Boot Arduboy2 Core (OLED SSD1309 on SDA=7, SCL=6 | D-Pad: UP=19, DOWN=20, LEFT=18, RIGHT=15, CLICK=13 | BOOT=9 | Buzzer=2)
     arduboy.begin();
     arduboy.setFrameRate(60);
 
@@ -6399,10 +6400,26 @@ void setup() {
     sound.noTone();
 
     Serial.println("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", Click=GPIO13, SDA=7, SCL=6)");
+    Serial.println("[DIAG] Monitor de Cruceta Activo (115200 baudios): GPIO 20, 19, 18, 15, 13");
 }
 
 void loop() {
     yield();
+
+    // -------------------------------------------------------------------------
+    // DIAGNÓSTICO EN TIEMPO REAL POR SERIAL (115200) - LECTURA DE CRUCETA
+    // -------------------------------------------------------------------------
+    const uint8_t diagPins[5] = {20, 19, 18, 15, 13};
+    static unsigned long lastPinTrigger[5] = {0, 0, 0, 0, 0};
+    for (uint8_t i = 0; i < 5; i++) {
+        if (digitalRead(diagPins[i]) == LOW) {
+            unsigned long now = millis();
+            if (now - lastPinTrigger[i] >= 150) {
+                lastPinTrigger[i] = now;
+                Serial.printf("PIN ACTIVADO: GPIO %d\n", diagPins[i]);
+            }
+        }
+    }
     // Non-blocking 1s RGB LED auto-off timer & tone auto-detach
     updateRgbLed();
     sound.update();

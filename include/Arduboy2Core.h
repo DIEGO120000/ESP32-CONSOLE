@@ -72,7 +72,16 @@ public:
 
 public:
     static void boot() {
-        // 1. Initialize all 5 D-Pad Directions and BOOT Button with INPUT_PULLUP
+        // 1. Reset and unbind any alternate functions (SPI/JTAG/Matrix) on all 5 D-Pad pins + BOOT
+        #if defined(ESP32)
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_DOWN);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_RIGHT);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_CLICK);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
+        #endif
+
         pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_DOWN, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
