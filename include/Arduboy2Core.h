@@ -182,21 +182,29 @@ public:
     }
 
     static uint8_t buttonsState() {
-        // Read 5-Way D-Pad (Active LOW with pullups)
-        bool bUp    = (digitalRead(ARDUBOY_PIN_UP) == LOW);    // GPIO 20 (UP)
-        bool bDown  = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);  // GPIO 19 (DOWN)
-        bool bLeft  = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);  // GPIO 18 (LEFT)
-        bool bRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW); // GPIO 15 (RIGHT)
-        bool bClick = (digitalRead(ARDUBOY_PIN_CLICK) == LOW); // GPIO 13 (CLICK / Center)
+        // Read 5-Way D-Pad (Active LOW with pullups) with temporal debounce filter
+        static uint8_t debouncedState = 0;
+        static uint8_t lastRawState = 0xFF;
+        static uint32_t lastDebounceTime = 0;
 
-        uint8_t btnMask = 0;
-        if (bUp)    btnMask |= UP_BUTTON;
-        if (bDown)  btnMask |= DOWN_BUTTON;
-        if (bLeft)  btnMask |= LEFT_BUTTON;
-        if (bRight) btnMask |= RIGHT_BUTTON;
-        if (bClick) btnMask |= A_BUTTON;
+        uint8_t raw = 0;
+        if (digitalRead(ARDUBOY_PIN_UP) == LOW)    raw |= UP_BUTTON;
+        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)  raw |= DOWN_BUTTON;
+        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)  raw |= LEFT_BUTTON;
+        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW) raw |= RIGHT_BUTTON;
+        if (digitalRead(ARDUBOY_PIN_CLICK) == LOW) raw |= (A_BUTTON | B_BUTTON); // Universal OK / Confirm
 
-        return btnMask;
+        uint32_t now = millis();
+        if (raw != lastRawState) {
+            lastRawState = raw;
+            lastDebounceTime = now;
+        }
+
+        if ((now - lastDebounceTime) >= 12) { // 12ms debounce window
+            debouncedState = raw;
+        }
+
+        return debouncedState;
     }
 
     static void setRGBled(uint8_t red, uint8_t green, uint8_t blue) {}

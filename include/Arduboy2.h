@@ -36,6 +36,9 @@ public:
         boot();
         audio.begin();
         setFrameRate(60);
+        delay(20);
+        pollButtons();
+        previousButtonState = currentButtonState;
     }
 
     void initRandomSeed() {

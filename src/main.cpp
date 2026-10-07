@@ -6323,7 +6323,20 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 
 void setup() {
     sound.noTone();
-    pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
+
+    // 1. Configuración explícita de hardware (Cruceta 5 vías + Click + BOOT)
+    pinMode(13, INPUT_PULLUP);                 // GPIO 13 -> Click Central (Confirmación / OK)
+    pinMode(PIN_UP, INPUT_PULLUP);             // GPIO 20 -> UP
+    pinMode(PIN_DOWN, INPUT_PULLUP);           // GPIO 19 -> DOWN
+    pinMode(PIN_LEFT, INPUT_PULLUP);           // GPIO 18 -> LEFT
+    pinMode(PIN_RIGHT, INPUT_PULLUP);          // GPIO 15 -> RIGHT
+    pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);   // GPIO 9  -> BOOT Button
+
+    // 2. Forzar explícitamente el estado global al MENÚ PRINCIPAL
+    currentState = STATE_MENU;
+    menuCursor = 0;
+    gamePaused = false;
+    isScreenSleeping = false;
 
     // -------------------------------------------------------------------------
     // POWER-ON: REQUERIR PULSACIÓN SOSTENIDA DE 3 SEGUNDOS TRAS DEEP SLEEP
@@ -6369,13 +6382,23 @@ void setup() {
     arduboy.begin();
     arduboy.setFrameRate(60);
 
+    // Estabilización y purga de transitorios de arranque en botones
+    delay(100);
+    for (uint8_t i = 0; i < 5; i++) {
+        arduboy.pollButtons();
+        delay(10);
+    }
+
+    // Garantizar que la consola inicie SIEMPRE en el menú principal multijuegos
+    currentState = STATE_MENU;
+    menuCursor = 0;
     lastActivityTime = millis();
 
     sound.tone(880, 40); delay(50);
     sound.tone(1760, 60); delay(70);
     sound.noTone();
 
-    Serial.println("[ESP32-C6] Retro Console Ready (Buzzer=GPIO2, UP=GPIO20, DOWN=GPIO19, LEFT=GPIO18, RIGHT=GPIO15, CLICK=GPIO13, BOOT=GPIO9, Standby=90s)!");
+    Serial.println("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", Click=GPIO13, SDA=7, SCL=6)");
 }
 
 void loop() {
