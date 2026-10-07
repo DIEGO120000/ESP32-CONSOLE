@@ -15,18 +15,20 @@
 #define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
 // 5-Way Mechanical Digital D-Pad Pins (Active LOW with INPUT_PULLUP)
-#define PIN_UP                 19   // Dirección 1 (UP)    -> GPIO 19
-#define PIN_DOWN               20   // Dirección 2 (DOWN)  -> GPIO 20
-#define PIN_LEFT               18   // Dirección 3 (LEFT)  -> GPIO 18
-#define PIN_RIGHT              15   // Dirección 4 (RIGHT) -> GPIO 15
-#define PIN_CLICK              13   // Pulsación Central (CLICK) -> GPIO 13
+#define ARDUBOY_PIN_UP         15   // Dirección UP    -> GPIO 15
+#define ARDUBOY_PIN_DOWN       18   // Dirección DOWN  -> GPIO 18
+#define ARDUBOY_PIN_RIGHT      19   // Dirección RIGHT -> GPIO 19
+#define ARDUBOY_PIN_LEFT       13   // Dirección LEFT  -> GPIO 13
+#define ARDUBOY_PIN_SELECT     20   // Pulsación Central (Click / Enter) -> GPIO 20
+#define ARDUBOY_PIN_CLICK      ARDUBOY_PIN_SELECT
 
-// Centralized Pin Constants
-#define ARDUBOY_PIN_UP         PIN_UP
-#define ARDUBOY_PIN_DOWN       PIN_DOWN
-#define ARDUBOY_PIN_LEFT       PIN_LEFT
-#define ARDUBOY_PIN_RIGHT      PIN_RIGHT
-#define ARDUBOY_PIN_CLICK      PIN_CLICK
+// Aliases for compatibility
+#define PIN_UP                 ARDUBOY_PIN_UP
+#define PIN_DOWN               ARDUBOY_PIN_DOWN
+#define PIN_RIGHT              ARDUBOY_PIN_RIGHT
+#define PIN_LEFT               ARDUBOY_PIN_LEFT
+#define PIN_SELECT             ARDUBOY_PIN_SELECT
+#define PIN_CLICK              ARDUBOY_PIN_SELECT
 
 // Legacy / compatibility aliases
 #define ARDUBOY_PIN_BTN1       ARDUBOY_PIN_UP
@@ -76,17 +78,17 @@ public:
         #if defined(ESP32)
         gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
         gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_DOWN);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
         gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_RIGHT);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_CLICK);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_SELECT);
         gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
         #endif
 
         pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_DOWN, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_RIGHT, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_CLICK, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
+        pinMode(ARDUBOY_PIN_SELECT, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
 
         // 2. Initialize Audio Buzzer on GPIO 2 (Full isolation & pulldown clamp)
@@ -191,29 +193,14 @@ public:
     }
 
     static uint8_t buttonsState() {
-        // Read 5-Way D-Pad (Active LOW with pullups) with temporal debounce filter
-        static uint8_t debouncedState = 0;
-        static uint8_t lastRawState = 0xFF;
-        static uint32_t lastDebounceTime = 0;
-
         uint8_t raw = 0;
-        if (digitalRead(ARDUBOY_PIN_UP) == LOW)    raw |= UP_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)  raw |= DOWN_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)  raw |= LEFT_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW) raw |= RIGHT_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_CLICK) == LOW) raw |= A_BUTTON; // EXCLUSIVAMENTE A_BUTTON (Enter / Select)
+        if (digitalRead(ARDUBOY_PIN_UP) == LOW)     raw |= UP_BUTTON;    // GPIO 15
+        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)   raw |= DOWN_BUTTON;  // GPIO 18
+        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW)  raw |= RIGHT_BUTTON; // GPIO 19
+        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)   raw |= LEFT_BUTTON;  // GPIO 13
+        if (digitalRead(ARDUBOY_PIN_SELECT) == LOW) raw |= A_BUTTON;     // GPIO 20 (Botón universal de confirmación / Enter)
 
-        uint32_t now = millis();
-        if (raw != lastRawState) {
-            lastRawState = raw;
-            lastDebounceTime = now;
-        }
-
-        if ((now - lastDebounceTime) >= 12) { // 12ms debounce window
-            debouncedState = raw;
-        }
-
-        return debouncedState;
+        return raw;
     }
 
     static void setRGBled(uint8_t red, uint8_t green, uint8_t blue) {}
