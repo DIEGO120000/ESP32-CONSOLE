@@ -6237,10 +6237,11 @@ enum SystemState {
     STATE_BRAINDU_TRAIN,
     STATE_HANGMAN,
     STATE_TRIS,
-    STATE_MATH_CHALLENGE
+    STATE_MATH_CHALLENGE,
+    STATE_PIN_DIAGNOSTIC
 };
 
-SystemState currentState = STATE_MENU;
+SystemState currentState = STATE_PIN_DIAGNOSTIC;
 int8_t menuCursor = 0;
 const char* menuItems[] = {
     "1. Ping Pong",
@@ -6257,9 +6258,10 @@ const char* menuItems[] = {
     "12. BrainduTrain",
     "13. Hangman",
     "14. TRIS",
-    "15. Math Challenge"
+    "15. Math Challenge",
+    "16. Test Pines Cruceta"
 };
-const uint8_t MENU_COUNT = 15;
+const uint8_t MENU_COUNT = 16;
 
 
 // System Pause & Power Management State
@@ -6397,8 +6399,8 @@ void setup() {
         delay(10);
     }
 
-    // Garantizar que la consola inicie SIEMPRE en el menú principal multijuegos
-    currentState = STATE_MENU;
+    // Iniciar directamente en el modo interactivo de Diagnóstico de Pines en OLED (BOOT: Menú)
+    currentState = STATE_PIN_DIAGNOSTIC;
     menuCursor = 0;
     lastActivityTime = millis();
 
@@ -6480,7 +6482,13 @@ void loop() {
             bootDebouncedDown = false;
             if (duration >= 50 && duration < 1000) {
                 // Short press:
-                if (currentState == STATE_TIC_TAC_TOE) {
+                if (currentState == STATE_PIN_DIAGNOSTIC) {
+                    sound.tone(1000, 20);
+                    currentState = STATE_MENU;
+                } else if (currentState == STATE_MENU) {
+                    sound.tone(1000, 20);
+                    currentState = STATE_PIN_DIAGNOSTIC;
+                } else if (currentState == STATE_TIC_TAC_TOE) {
                     ticTacToe.onBootShortPress();
                 } else if (currentState == STATE_BRAINDU_TRAIN) {
                     brainduTrain.onBootShortPress();
@@ -6533,7 +6541,7 @@ void loop() {
     arduboy.clear();
 
     // Universal Exit Combo: Hold B1 (GPIO 14) + B4 (GPIO 18) or B3 (GPIO 7) + B4 (GPIO 18) >= 450ms returns to menu
-    if (currentState != STATE_MENU) {
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC) {
         bool comboHeld = (arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
                          (arduboy.pressed(A_BUTTON) && arduboy.pressed(B_BUTTON));
         if (comboHeld) {
@@ -6625,6 +6633,7 @@ void loop() {
                 else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
                 else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
                 else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
+                else if (menuCursor == 15) { currentState = STATE_PIN_DIAGNOSTIC; }
             }
             break;
         }
@@ -6707,10 +6716,110 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+
+        case STATE_PIN_DIAGNOSTIC: {
+            // Header Bar
+            arduboy.fillRect(0, 0, 128, 9, WHITE);
+            arduboy.setTextColor(BLACK);
+            arduboy.setCursor(6, 1);
+            arduboy.print("DIAGNOSTICO CRUCETA");
+            arduboy.setTextColor(WHITE);
+
+            bool p19 = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // GPIO 19
+            bool p20 = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);     // GPIO 20
+            bool p18 = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);     // GPIO 18
+            bool p15 = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);    // GPIO 15
+            bool p13 = (digitalRead(ARDUBOY_PIN_CLICK) == LOW);    // GPIO 13
+            bool p9  = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);     // GPIO 9
+
+            // UP Box (GPIO 19)
+            if (p19) {
+                arduboy.fillRect(48, 11, 32, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+            } else {
+                arduboy.drawRect(48, 11, 32, 12, WHITE);
+                arduboy.setTextColor(WHITE);
+            }
+            arduboy.setCursor(51, 13);
+            arduboy.print("UP 19");
+
+            // DOWN Box (GPIO 20)
+            if (p20) {
+                arduboy.fillRect(48, 37, 32, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+            } else {
+                arduboy.drawRect(48, 37, 32, 12, WHITE);
+                arduboy.setTextColor(WHITE);
+            }
+            arduboy.setCursor(49, 39);
+            arduboy.print("DN 20");
+
+            // LEFT Box (GPIO 18)
+            if (p18) {
+                arduboy.fillRect(14, 24, 32, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+            } else {
+                arduboy.drawRect(14, 24, 32, 12, WHITE);
+                arduboy.setTextColor(WHITE);
+            }
+            arduboy.setCursor(17, 26);
+            arduboy.print("LT 18");
+
+            // RIGHT Box (GPIO 15)
+            if (p15) {
+                arduboy.fillRect(82, 24, 32, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+            } else {
+                arduboy.drawRect(82, 24, 32, 12, WHITE);
+                arduboy.setTextColor(WHITE);
+            }
+            arduboy.setCursor(85, 26);
+            arduboy.print("RT 15");
+
+            // CENTER Box (GPIO 13)
+            if (p13) {
+                arduboy.fillRect(48, 24, 32, 12, WHITE);
+                arduboy.setTextColor(BLACK);
+            } else {
+                arduboy.drawRect(48, 24, 32, 12, WHITE);
+                arduboy.setTextColor(WHITE);
+            }
+            arduboy.setCursor(51, 26);
+            arduboy.print("OK 13");
+            arduboy.setTextColor(WHITE);
+
+            // Audio feedback per pin
+            static uint8_t lastPlayedPin = 255;
+            if (p19 && lastPlayedPin != 19) { sound.tone(1200, 30); lastPlayedPin = 19; }
+            else if (p20 && lastPlayedPin != 20) { sound.tone(800, 30); lastPlayedPin = 20; }
+            else if (p18 && lastPlayedPin != 18) { sound.tone(950, 30); lastPlayedPin = 18; }
+            else if (p15 && lastPlayedPin != 15) { sound.tone(1100, 30); lastPlayedPin = 15; }
+            else if (p13 && lastPlayedPin != 13) { sound.tone(1760, 50); lastPlayedPin = 13; }
+            else if (!p19 && !p20 && !p18 && !p15 && !p13 && !p9) { lastPlayedPin = 255; }
+
+            // Footer / Status
+            arduboy.drawFastHLine(0, 51, 128, WHITE);
+            if (p19) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 19");
+            } else if (p20) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 20");
+            } else if (p18) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 18");
+            } else if (p15) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 15");
+            } else if (p13) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 13");
+            } else if (p9) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 9");
+            } else {
+                arduboy.setCursor(6, 54); arduboy.print("Pulsa pin | BOOT:Menu");
+            }
+            break;
+        }
     }
 
     // Pause Overlay Window
-    if (currentState != STATE_MENU && gamePaused) {
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && gamePaused) {
         arduboy.fillRect(12, 16, 104, 32, BLACK);
         arduboy.drawRect(12, 16, 104, 32, WHITE);
         arduboy.drawRect(14, 18, 100, 28, WHITE);
