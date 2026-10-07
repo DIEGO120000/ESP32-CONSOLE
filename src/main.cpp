@@ -324,17 +324,17 @@ struct PingPongGame {
     }
 
     void updateSubmenu() {
-        if (arduboy.justPressed(LEFT_BUTTON) || arduboy.justPressed(UP_BUTTON)) {
+        if (arduboy.justPressed(UP_BUTTON)) {
             sound.tone(880, 15);
             submenuCursor--;
             if (submenuCursor < 0) submenuCursor = 1;
         }
-        if (arduboy.justPressed(RIGHT_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+        if (arduboy.justPressed(DOWN_BUTTON)) {
             sound.tone(700, 15);
             submenuCursor++;
             if (submenuCursor > 1) submenuCursor = 0;
         }
-        if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) {
+        if (arduboy.justPressed(A_BUTTON)) {
             sound.tone(1760, 40);
             if (submenuCursor == 0) {
                 initNormal();
@@ -389,9 +389,9 @@ struct PingPongGame {
             return;
         }
 
-        // --- Player Controls (B1: Up, B2: Down) ---
-        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && p1Y > 11.0f) p1Y -= 2.6f;
-        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && p1Y < 46.0f) p1Y += 2.6f;
+        // --- Player Controls (UP: GPIO 15, DOWN: GPIO 18) ---
+        if (arduboy.pressed(UP_BUTTON) && p1Y > 11.0f) p1Y -= 2.6f;
+        if (arduboy.pressed(DOWN_BUTTON) && p1Y < 46.0f) p1Y += 2.6f;
 
         // --- CPU AI with Human-like Inertia & Error Margin ---
         if (bvx > 0.0f) {
@@ -537,9 +537,9 @@ struct PingPongGame {
             return;
         }
 
-        // Player Controls (B1: Up, B2: Down)
-        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && p1Y > 11.0f) p1Y -= 2.6f;
-        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && p1Y < 46.0f) p1Y += 2.6f;
+        // Player Controls (UP: GPIO 15, DOWN: GPIO 18)
+        if (arduboy.pressed(UP_BUTTON) && p1Y > 11.0f) p1Y -= 2.6f;
+        if (arduboy.pressed(DOWN_BUTTON) && p1Y < 46.0f) p1Y += 2.6f;
 
         // Launch Cooldown (CPU prepares next launch)
         if (launchCooldown > 0) {
@@ -1117,9 +1117,9 @@ struct BreakoutGame {
 
         if (laserCooldown > 0) laserCooldown--;
 
-        // --- Controls: Paddle Movement ---
-        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && paddleX > 2.0f) paddleX -= 2.8f;
-        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && paddleX + paddleWidth < 126.0f) paddleX += 2.8f;
+        // --- Controls: Paddle Movement (LEFT: GPIO 13, RIGHT: GPIO 19) ---
+        if (arduboy.pressed(LEFT_BUTTON) && paddleX > 2.0f) paddleX -= 2.8f;
+        if (arduboy.pressed(RIGHT_BUTTON) && paddleX + paddleWidth < 126.0f) paddleX += 2.8f;
 
         // --- Automatic Laser Auto-Fire (Periodic ~380ms) ---
         if (activePowerUp == PWR_LASER) {
@@ -1130,8 +1130,8 @@ struct BreakoutGame {
             }
         }
 
-        // --- Action Button (B3 / B4) (Manual Launch for Catch & Serve) ---
-        bool actionPressed = arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON);
+        // --- Action Button (A_BUTTON: GPIO 20) (Manual Launch for Catch & Serve) ---
+        bool actionPressed = arduboy.justPressed(A_BUTTON);
         if (actionPressed) {
             for (uint8_t b = 0; b < 3; b++) {
                 if (balls[b].active && balls[b].stuck) {
@@ -1647,11 +1647,11 @@ struct SpaceInvadersGame {
             return;
         }
 
-        // Player Controls
-        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && playerX > 2) playerX -= 2;
-        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && playerX < 114) playerX += 2;
+        // Player Controls (LEFT: GPIO 13, RIGHT: GPIO 19)
+        if (arduboy.pressed(LEFT_BUTTON) && playerX > 2) playerX -= 2;
+        if (arduboy.pressed(RIGHT_BUTTON) && playerX < 114) playerX += 2;
 
-        if ((arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON)) && !bulletActive) {
+        if (arduboy.justPressed(A_BUTTON) && !bulletActive) {
             bulletX = playerX + 5;
             bulletY = 54;
             bulletActive = true;
@@ -1967,13 +1967,13 @@ struct AirCombatGame {
             }
         }
 
-        // Controls
-        if ((arduboy.pressed(LEFT_BUTTON) || arduboy.pressed(UP_BUTTON)) && planeX > 2) planeX -= 2;
-        if ((arduboy.pressed(RIGHT_BUTTON) || arduboy.pressed(DOWN_BUTTON)) && planeX < 116) planeX += 2;
+        // Controls (LEFT: GPIO 13, RIGHT: GPIO 19)
+        if (arduboy.pressed(LEFT_BUTTON) && planeX > 2) planeX -= 2;
+        if (arduboy.pressed(RIGHT_BUTTON) && planeX < 116) planeX += 2;
 
         static uint8_t shootTimer = 0;
         shootTimer++;
-        if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) || shootTimer > 16) {
+        if (arduboy.justPressed(A_BUTTON) || shootTimer > 16) {
             shootTimer = 0;
             for (uint8_t i = 0; i < 3; i++) {
                 if (!bulletActive[i]) {
@@ -2273,9 +2273,9 @@ struct SnakeGame {
         }
 
         // Direction Input with Strict 180° Reverse Lock
-        if ((arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(A_BUTTON)) && currentDir != DIR_DOWN) {
+        if (arduboy.justPressed(UP_BUTTON) && currentDir != DIR_DOWN) {
             nextDir = DIR_UP;
-        } else if ((arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(B_BUTTON)) && currentDir != DIR_UP) {
+        } else if (arduboy.justPressed(DOWN_BUTTON) && currentDir != DIR_UP) {
             nextDir = DIR_DOWN;
         } else if (arduboy.justPressed(LEFT_BUTTON) && currentDir != DIR_RIGHT) {
             nextDir = DIR_LEFT;
@@ -2909,21 +2909,21 @@ struct Game2048 {
             return;
         }
 
-        // Botón 1 (GPIO 14): Deslizar ARRIBA
-        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+        // Deslizar ARRIBA (UP_BUTTON - GPIO 15)
+        if (arduboy.justPressed(UP_BUTTON)) {
             moveUp();
         }
-        // Botón 2 (GPIO 0): Deslizar ABAJO
-        else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+        // Deslizar ABAJO (DOWN_BUTTON - GPIO 18)
+        else if (arduboy.justPressed(DOWN_BUTTON)) {
             moveDown();
         }
-        // Botón 3 (GPIO 7): Deslizar DERECHA (A_BUTTON)
-        else if (arduboy.justPressed(A_BUTTON)) {
-            moveRight();
-        }
-        // Botón 4 (GPIO 18): Deslizar IZQUIERDA (B_BUTTON)
-        else if (arduboy.justPressed(B_BUTTON)) {
+        // Deslizar IZQUIERDA (LEFT_BUTTON - GPIO 13)
+        else if (arduboy.justPressed(LEFT_BUTTON)) {
             moveLeft();
+        }
+        // Deslizar DERECHA (RIGHT_BUTTON - GPIO 19)
+        else if (arduboy.justPressed(RIGHT_BUTTON)) {
+            moveRight();
         }
     }
 
@@ -3296,16 +3296,15 @@ struct TRexGame {
             return;
         }
 
-        // --- Controles ---
-        // Salto: Botón 1 (UP / LEFT)
-        if ((arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) && onGround) {
+        // Salto: UP o A_BUTTON (GPIO 15 / GPIO 20)
+        if ((arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(A_BUTTON)) && onGround) {
             dinoVY = -4.3f;
             onGround = false;
             sound.tone(800, 30);
         }
 
-        // Agacharse: Botón 2 (DOWN / RIGHT)
-        isDucking = (arduboy.pressed(DOWN_BUTTON) || arduboy.pressed(RIGHT_BUTTON));
+        // Agacharse: DOWN (GPIO 18)
+        isDucking = arduboy.pressed(DOWN_BUTTON);
         if (isDucking && !onGround) {
             // Caída rápida
             dinoVY += 0.4f;
@@ -3619,20 +3618,18 @@ struct TicTacToeGame {
     }
 
     void updateModeSelect() {
-        // B1 (GPIO 14) -> ARRIBA / IZQUIERDA
-        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+        if (arduboy.justPressed(UP_BUTTON)) {
             modeCursor--;
             if (modeCursor < 0) modeCursor = 1;
             sound.tone(900, 15);
         }
-        // B2 (GPIO 0) -> ABAJO / DERECHA
-        else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+        else if (arduboy.justPressed(DOWN_BUTTON)) {
             modeCursor++;
             if (modeCursor > 1) modeCursor = 0;
             sound.tone(900, 15);
         }
 
-        // Confirmación con BOOT (GPIO 9) o Botón 3 (GPIO 7 - A_BUTTON)
+        // Confirmación con A_BUTTON (GPIO 20) o BOOT (GPIO 9)
         if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
             sound.tone(1200, 40);
             if (modeCursor == 0) {
@@ -3648,20 +3645,18 @@ struct TicTacToeGame {
     }
 
     void updateDifficultySelect() {
-        // B1 (GPIO 14) -> ARRIBA
-        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+        if (arduboy.justPressed(UP_BUTTON)) {
             diffCursor--;
             if (diffCursor < 0) diffCursor = 2;
             sound.tone(900, 15);
         }
-        // B2 (GPIO 0) -> ABAJO
-        else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+        else if (arduboy.justPressed(DOWN_BUTTON)) {
             diffCursor++;
             if (diffCursor > 2) diffCursor = 0;
             sound.tone(900, 15);
         }
 
-        // Confirmación con BOOT (GPIO 9) o Botón 3 (GPIO 7 - A_BUTTON)
+        // Confirmación con A_BUTTON (GPIO 20) o BOOT (GPIO 9)
         if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
             difficulty = (TTTDifficulty)diffCursor;
             resetRound();
@@ -3689,37 +3684,37 @@ struct TicTacToeGame {
 
             if (!playerTurn) return;
 
-            // Botón 1 (GPIO 14): Mover cursor ARRIBA
-            if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+            // Mover cursor ARRIBA
+            if (arduboy.justPressed(UP_BUTTON)) {
                 if (cursorRow > 0) {
                     cursorRow--;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 2 (GPIO 0): Mover cursor ABAJO
-            else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+            // Mover cursor ABAJO
+            else if (arduboy.justPressed(DOWN_BUTTON)) {
                 if (cursorRow < 2) {
                     cursorRow++;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 3 (GPIO 7): Mover cursor DERECHA
-            else if (arduboy.justPressed(A_BUTTON)) {
+            // Mover cursor DERECHA
+            else if (arduboy.justPressed(RIGHT_BUTTON)) {
                 if (cursorCol < 2) {
                     cursorCol++;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 4 (GPIO 18): Mover cursor IZQUIERDA
-            else if (arduboy.justPressed(B_BUTTON)) {
+            // Mover cursor IZQUIERDA
+            else if (arduboy.justPressed(LEFT_BUTTON)) {
                 if (cursorCol > 0) {
                     cursorCol--;
                     sound.tone(900, 15);
                 }
             }
 
-            // Selección / Colocación con botón BOOT (GPIO 9)
-            if (bootActionTriggered) {
+            // Selección / Colocación con A_BUTTON (GPIO 20) o BOOT (GPIO 9)
+            if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
                 if (board[cursorRow][cursorCol] == 0) {
                     board[cursorRow][cursorCol] = 1; // PLY ('X')
                     sound.tone(1200, 40);
@@ -3742,37 +3737,37 @@ struct TicTacToeGame {
             // =========================================================
             // MODO 2 JUGADORES (TURNOS ALTERNOS: P1 'X' / P2 'O')
             // =========================================================
-            // Botón 1 (GPIO 14): Mover cursor ARRIBA
-            if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+            // Mover cursor ARRIBA
+            if (arduboy.justPressed(UP_BUTTON)) {
                 if (cursorRow > 0) {
                     cursorRow--;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 2 (GPIO 0): Mover cursor ABAJO
-            else if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
+            // Mover cursor ABAJO
+            else if (arduboy.justPressed(DOWN_BUTTON)) {
                 if (cursorRow < 2) {
                     cursorRow++;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 3 (GPIO 7): Mover cursor DERECHA
-            else if (arduboy.justPressed(A_BUTTON)) {
+            // Mover cursor DERECHA
+            else if (arduboy.justPressed(RIGHT_BUTTON)) {
                 if (cursorCol < 2) {
                     cursorCol++;
                     sound.tone(900, 15);
                 }
             }
-            // Botón 4 (GPIO 18): Mover cursor IZQUIERDA
-            else if (arduboy.justPressed(B_BUTTON)) {
+            // Mover cursor IZQUIERDA
+            else if (arduboy.justPressed(LEFT_BUTTON)) {
                 if (cursorCol > 0) {
                     cursorCol--;
                     sound.tone(900, 15);
                 }
             }
 
-            // Selección / Colocación con botón BOOT (GPIO 9)
-            if (bootActionTriggered) {
+            // Selección / Colocación con A_BUTTON (GPIO 20) o BOOT (GPIO 9)
+            if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
                 if (board[cursorRow][cursorCol] == 0) {
                     board[cursorRow][cursorCol] = turnPlayer; // 1 ('X') o 2 ('O')
                     sound.tone(1200, 40);
@@ -4714,30 +4709,33 @@ struct BrainduTrainGame {
         if (state == BT_STATE_MENU) {
             // Strictly orthogonal, one-shot movement (150ms debounce lockout)
             if (millis() - lastNavTime >= 150) {
-                if (arduboy.justPressed(UP_BUTTON)) { // Botón 1 (GPIO 14) -> ARRIBA exclusivamente
+                if (arduboy.justPressed(UP_BUTTON)) {
                     if (menuRow > 0) menuRow--;
                     else menuRow = 2;
                     select = menuRow * 3 + menuCol;
                     sound.tone(5000, 10);
                     lastNavTime = millis();
-                } else if (arduboy.justPressed(DOWN_BUTTON)) { // Botón 2 (GPIO 0) -> ABAJO exclusivamente
+                } else if (arduboy.justPressed(DOWN_BUTTON)) {
                     if (menuRow < 2) menuRow++;
                     else menuRow = 0;
                     select = menuRow * 3 + menuCol;
                     sound.tone(5000, 10);
                     lastNavTime = millis();
-                } else if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) { // Botón 3 (GPIO 7) -> IZQUIERDA exclusivamente
+                } else if (arduboy.justPressed(LEFT_BUTTON)) {
                     if (menuCol > 0) menuCol--;
                     else menuCol = 2;
                     select = menuRow * 3 + menuCol;
                     sound.tone(5000, 10);
                     lastNavTime = millis();
-                } else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) { // Botón 4 (GPIO 18) -> DERECHA exclusivamente
+                } else if (arduboy.justPressed(RIGHT_BUTTON)) {
                     if (menuCol < 2) menuCol++;
                     else menuCol = 0;
                     select = menuRow * 3 + menuCol;
                     sound.tone(5000, 10);
                     lastNavTime = millis();
+                } else if (arduboy.justPressed(A_BUTTON)) {
+                    sound.tone(1760, 40);
+                    startExercise(select);
                 }
             }
             return;
@@ -4778,10 +4776,10 @@ struct BrainduTrainGame {
             uint8_t curAct = (select == 8) ? activeMixType : select;
 
             if (curAct == 0) { // Math
-                if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) { // B3 (GPIO 7 - Opción izquierda)
+                if (arduboy.justPressed(LEFT_BUTTON)) { // Opción izquierda
                     if (mathOpt1Correct) handleCorrect();
                     else handleWrong();
-                } else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) { // B4 (GPIO 18 - Opción derecha)
+                } else if (arduboy.justPressed(RIGHT_BUTTON)) { // Opción derecha
                     if (!mathOpt1Correct) handleCorrect();
                     else handleWrong();
                 }
@@ -4789,8 +4787,8 @@ struct BrainduTrainGame {
                 int8_t pressedDir = -1;
                 if (arduboy.justPressed(UP_BUTTON)) pressedDir = 0;
                 else if (arduboy.justPressed(DOWN_BUTTON)) pressedDir = 1;
-                else if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) pressedDir = 2;
-                else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) pressedDir = 3;
+                else if (arduboy.justPressed(LEFT_BUTTON)) pressedDir = 2;
+                else if (arduboy.justPressed(RIGHT_BUTTON)) pressedDir = 3;
 
                 if (pressedDir >= 0) {
                     uint8_t target = arrowDir;
@@ -4804,12 +4802,12 @@ struct BrainduTrainGame {
                     else handleWrong();
                 }
             } else if (curAct == 2) { // Mayor / Menor
-                if (arduboy.justPressed(UP_BUTTON)) { // B1: Mayor
+                if (arduboy.justPressed(UP_BUTTON)) { // Mayor
                     if (hlNext > hlCurrent) {
                         hlCurrent = hlNext;
                         handleCorrect();
                     } else handleWrong();
-                } else if (arduboy.justPressed(DOWN_BUTTON)) { // B2: Menor
+                } else if (arduboy.justPressed(DOWN_BUTTON)) { // Menor
                     if (hlNext < hlCurrent) {
                         hlCurrent = hlNext;
                         handleCorrect();
@@ -4819,8 +4817,8 @@ struct BrainduTrainGame {
                 int8_t pressedPos = -1;
                 if (arduboy.justPressed(UP_BUTTON)) pressedPos = 0;
                 else if (arduboy.justPressed(DOWN_BUTTON)) pressedPos = 1;
-                else if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) pressedPos = 2;
-                else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) pressedPos = 3;
+                else if (arduboy.justPressed(LEFT_BUTTON)) pressedPos = 2;
+                else if (arduboy.justPressed(RIGHT_BUTTON)) pressedPos = 3;
 
                 if (pressedPos >= 0) {
                     if (pressedPos == oddPos) handleCorrect();
@@ -4846,10 +4844,10 @@ struct BrainduTrainGame {
                 }
             } else if (curAct == 5) { // Count dots (Flash Dots 800ms)
                 if (millis() - dotShowStartTime >= 800) {
-                    if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) { // B3 (GPIO 7)
+                    if (arduboy.justPressed(LEFT_BUTTON)) {
                         if (countOpt1Correct) handleCorrect();
                         else handleWrong();
-                    } else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) { // B4 (GPIO 18)
+                    } else if (arduboy.justPressed(RIGHT_BUTTON)) {
                         if (!countOpt1Correct) handleCorrect();
                         else handleWrong();
                     }
@@ -4870,8 +4868,8 @@ struct BrainduTrainGame {
                     int8_t pressedDir = -1;
                     if (arduboy.justPressed(UP_BUTTON)) pressedDir = 0;
                     else if (arduboy.justPressed(DOWN_BUTTON)) pressedDir = 1;
-                    else if (arduboy.justPressed(A_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) pressedDir = 2;
-                    else if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) pressedDir = 3;
+                    else if (arduboy.justPressed(LEFT_BUTTON)) pressedDir = 2;
+                    else if (arduboy.justPressed(RIGHT_BUTTON)) pressedDir = 3;
 
                     if (pressedDir >= 0) {
                         if (pressedDir == seqPattern[seqPlayerIdx]) {
@@ -5405,21 +5403,21 @@ struct HangmanGame {
                 playTone(900, 12);
             }
         }
-        // Botón 3 (GPIO 7): Mover cursor IZQUIERDA
-        if (arduboy.justPressed(A_BUTTON)) {
+        // Mover cursor IZQUIERDA
+        if (arduboy.justPressed(LEFT_BUTTON)) {
             if (cursor == 0) cursor = 25;
             else cursor--;
             playTone(900, 12);
         }
-        // Botón 4 (GPIO 18): Mover cursor DERECHA
-        if (arduboy.justPressed(B_BUTTON)) {
+        // Mover cursor DERECHA
+        if (arduboy.justPressed(RIGHT_BUTTON)) {
             if (cursor == 25) cursor = 0;
             else cursor++;
             playTone(900, 12);
         }
 
-        // Confirmación de Letra: Botón BOOT (GPIO 9)
-        if (bootActionTriggered) {
+        // Confirmación de Letra: A_BUTTON (GPIO 20) o Botón BOOT (GPIO 9)
+        if (bootActionTriggered || arduboy.justPressed(A_BUTTON)) {
             if (usedLetters[cursor] == 0) {
                 usedLetters[cursor] = 1;
                 scoreResponse(cursor + 'A');
@@ -6050,7 +6048,7 @@ struct TrisGame {
 
         // --- MODO JUEGO ACTIVO ---
         // Rotar
-        if (arduboy.justPressed(UP_BUTTON)) {
+        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(A_BUTTON)) {
             uint8_t nextRot = (currentRot + 1) % 4;
             if (!checkCollision(currentX, currentY, currentPiece, nextRot)) {
                 currentRot = nextRot; sound.tone(1400, 8);
@@ -6066,14 +6064,14 @@ struct TrisGame {
         }
 
         // Izquierda
-        if (arduboy.justPressed(A_BUTTON)) {
+        if (arduboy.justPressed(LEFT_BUTTON)) {
             if (!checkCollision(currentX - 1, currentY, currentPiece, currentRot)) {
                 currentX--; sound.tone(1100, 8);
             }
         }
 
         // Derecha
-        if (arduboy.justPressed(B_BUTTON)) {
+        if (arduboy.justPressed(RIGHT_BUTTON)) {
             if (!checkCollision(currentX + 1, currentY, currentPiece, currentRot)) {
                 currentX++; sound.tone(1100, 8);
             }

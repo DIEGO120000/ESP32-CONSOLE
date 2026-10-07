@@ -42,13 +42,17 @@
 // Audio Buzzer Output (Speaker connected to GPIO 2)
 #define ARDUBOY_PIN_BUZZER     2    // Speaker/Buzzer -> GPIO 2
 
+#ifndef _BV
+#define _BV(bit) (1 << (bit))
+#endif
+
 // Arduboy Button Bitmasks
-#define LEFT_BUTTON            0x20
-#define RIGHT_BUTTON           0x40
-#define UP_BUTTON              0x80
-#define DOWN_BUTTON            0x10
-#define A_BUTTON               0x08
-#define B_BUTTON               0x04
+#define UP_BUTTON              _BV(7) // 0x80
+#define RIGHT_BUTTON           _BV(6) // 0x40
+#define LEFT_BUTTON            _BV(5) // 0x20
+#define DOWN_BUTTON            _BV(4) // 0x10
+#define A_BUTTON               _BV(3) // 0x08
+#define B_BUTTON               _BV(2) // 0x04
 
 #define WIDTH                  128
 #define HEIGHT                 64
