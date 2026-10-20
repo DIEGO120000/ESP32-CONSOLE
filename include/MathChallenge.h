@@ -72,7 +72,8 @@ struct MathChallengeGame {
 
     // Dedicated 1:1 Hardware Button Management with 50ms Debounce & One-Shot Falling Edge
     static const uint32_t MATH_DEBOUNCE_MS = 50;
-    MathButtonInput buttons[4];
+    static const uint8_t NUM_MATH_BUTTONS = 5;
+    MathButtonInput buttons[NUM_MATH_BUTTONS];
 
     // Anti-repetition and dynamic stochastic rotation (Fisher-Yates Bag)
     static const uint8_t BASIC_OP_COUNT = 7;
@@ -127,7 +128,7 @@ struct MathChallengeGame {
 
     void resetInputs() {
         uint32_t now = millis();
-        for (uint8_t i = 0; i < 4; i++) {
+        for (uint8_t i = 0; i < NUM_MATH_BUTTONS; i++) {
             buttons[i].triggered = false;
             buttons[i].isDown = (digitalRead(buttons[i].pin) == LOW);
             buttons[i].lastTransition = now;
@@ -136,7 +137,7 @@ struct MathChallengeGame {
 
     void updateInputs() {
         uint32_t now = millis();
-        for (uint8_t i = 0; i < 4; i++) {
+        for (uint8_t i = 0; i < NUM_MATH_BUTTONS; i++) {
             buttons[i].triggered = false;
             bool rawDown = (digitalRead(buttons[i].pin) == LOW);
 
@@ -158,7 +159,7 @@ struct MathChallengeGame {
     }
 
     bool btnTriggered(uint8_t idx) const {
-        if (idx < 4) return buttons[idx].triggered;
+        if (idx < NUM_MATH_BUTTONS) return buttons[idx].triggered;
         return false;
     }
 
@@ -179,10 +180,11 @@ struct MathChallengeGame {
         // Direction 2 (DOWN - GPIO 20)  -> Recuadro [2] (options[1])
         // Direction 3 (LEFT - GPIO 18)  -> Recuadro [3] (options[2])
         // Direction 4 (RIGHT - GPIO 15) -> Recuadro [4] (options[3])
-        buttons[0].pin = ARDUBOY_PIN_UP;    // GPIO 19
-        buttons[1].pin = ARDUBOY_PIN_DOWN;  // GPIO 20
-        buttons[2].pin = ARDUBOY_PIN_LEFT;  // GPIO 18
-        buttons[3].pin = ARDUBOY_PIN_RIGHT; // GPIO 15
+        buttons[0].pin = ARDUBOY_PIN_UP;     // GPIO 14 (UP)
+        buttons[1].pin = ARDUBOY_PIN_DOWN;   // GPIO 18 (DOWN)
+        buttons[2].pin = ARDUBOY_PIN_LEFT;   // GPIO 5  (LEFT)
+        buttons[3].pin = ARDUBOY_PIN_RIGHT;  // GPIO 19 (RIGHT)
+        buttons[4].pin = ARDUBOY_PIN_SELECT; // GPIO 20 (CLICK CENTRAL / OK)
         resetInputs();
 
         // Initialize stochastic 7-op bag & history
@@ -232,6 +234,8 @@ struct MathChallengeGame {
             }
         } else if (state == MATH_STATE_GAMEOVER) {
             init();
+        } else if (state == MATH_STATE_MODE_SELECT) {
+            exitRequested = true;
         }
     }
 
@@ -777,12 +781,15 @@ struct MathChallengeGame {
         updateInputs();
 
         if (isPaused) {
-            // In pause: Check B3 (Resume), B4 (Change Mode), or BOOT handled by system
-            if (btnTriggered(2)) { // Button 3 (GPIO 7)
+            // In pause: Check OK (Resume), Change Mode, or BOOT handled by system
+            bool resumePressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2);
+            bool changeModePressed = btnTriggered(3) || arduboy.justPressed(LEFT_BUTTON);
+            if (resumePressed) {
                 isPaused = false;
                 sound.tone(900, 30);
                 lastTickTime = millis();
-            } else if (btnTriggered(3)) { // Button 4 (GPIO 18)
+                resetInputs();
+            } else if (changeModePressed) {
                 isPaused = false;
                 init();
             }
@@ -809,47 +816,57 @@ struct MathChallengeGame {
     }
 
     void updateModeSelect() {
-        if (btnTriggered(0)) { // Button 1 (GPIO 14)
+        bool upPressed = btnTriggered(0) || arduboy.justPressed(UP_BUTTON);
+        bool downPressed = btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON);
+        bool confirmPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2) || arduboy.justPressed(RIGHT_BUTTON);
+        bool exitPressed = arduboy.justPressed(LEFT_BUTTON);
+
+        if (upPressed) {
             sound.tone(880, 15);
             modeCursor--;
             if (modeCursor < 0) modeCursor = 1;
         }
-        if (btnTriggered(1)) { // Button 2 (GPIO 0)
+        if (downPressed) {
             sound.tone(700, 15);
             modeCursor++;
             if (modeCursor > 1) modeCursor = 0;
         }
-        if (btnTriggered(2)) { // Button 3 (GPIO 7)
+        if (confirmPressed) {
             sound.tone(1760, 40);
             mode = (modeCursor == 0) ? MATH_MODE_TIME_ATTACK : MATH_MODE_CHILL;
             state = MATH_STATE_CAT_SELECT;
             catCursor = 0;
-        }
-        if (btnTriggered(3)) { // Button 4 (GPIO 18)
+            resetInputs();
+        } else if (exitPressed) {
             sound.tone(500, 30);
             exitRequested = true;
         }
     }
 
     void updateCatSelect() {
-        if (btnTriggered(0)) { // Button 1 (GPIO 14)
+        bool upPressed = btnTriggered(0) || arduboy.justPressed(UP_BUTTON);
+        bool downPressed = btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON);
+        bool confirmPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2) || arduboy.justPressed(RIGHT_BUTTON);
+        bool backPressed = btnTriggered(3) || arduboy.justPressed(LEFT_BUTTON);
+
+        if (upPressed) {
             sound.tone(880, 15);
             catCursor--;
             if (catCursor < 0) catCursor = 3;
         }
-        if (btnTriggered(1)) { // Button 2 (GPIO 0)
+        if (downPressed) {
             sound.tone(700, 15);
             catCursor++;
             if (catCursor > 3) catCursor = 0;
         }
-        if (btnTriggered(2)) { // Button 3 (GPIO 7)
+        if (confirmPressed) {
             sound.tone(1760, 50);
             category = (MathCategory)catCursor;
             startNewGame();
-        }
-        if (btnTriggered(3)) { // Button 4 (GPIO 18)
+        } else if (backPressed) {
             sound.tone(500, 30);
             state = MATH_STATE_MODE_SELECT;
+            resetInputs();
         }
     }
 
@@ -877,14 +894,14 @@ struct MathChallengeGame {
         // Button 3 (GPIO 7)  -> Recuadro [3] (options[2])
         // Button 4 (GPIO 18) -> Recuadro [4] (options[3])
         int8_t chosen = -1;
-        if (btnTriggered(0)) {
-            chosen = 0; // Box [1] -> Button 1 (GPIO 14)
-        } else if (btnTriggered(1)) {
-            chosen = 1; // Box [2] -> Button 2 (GPIO 0)
-        } else if (btnTriggered(2)) {
-            chosen = 2; // Box [3] -> Button 3 (GPIO 7)
-        } else if (btnTriggered(3)) {
-            chosen = 3; // Box [4] -> Button 4 (GPIO 18)
+        if (btnTriggered(0) || arduboy.justPressed(UP_BUTTON)) {
+            chosen = 0; // Box [1] -> UP (GPIO 14)
+        } else if (btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON)) {
+            chosen = 1; // Box [2] -> DOWN (GPIO 18)
+        } else if (btnTriggered(2) || arduboy.justPressed(LEFT_BUTTON)) {
+            chosen = 2; // Box [3] -> LEFT (GPIO 5)
+        } else if (btnTriggered(3) || arduboy.justPressed(RIGHT_BUTTON)) {
+            chosen = 3; // Box [4] -> RIGHT (GPIO 19)
         }
 
         if (chosen >= 0) {
@@ -947,10 +964,13 @@ struct MathChallengeGame {
     }
 
     void updateGameOver() {
-        if (btnTriggered(2)) { // Button 3 (GPIO 7)
+        bool retryPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2);
+        bool exitPressed = btnTriggered(3) || arduboy.justPressed(LEFT_BUTTON);
+
+        if (retryPressed) {
             sound.tone(1760, 50);
             startNewGame();
-        } else if (btnTriggered(3)) { // Button 4 (GPIO 18)
+        } else if (exitPressed) {
             sound.tone(600, 30);
             exitRequested = true;
         }
@@ -1029,7 +1049,7 @@ struct MathChallengeGame {
         // Bottom Bar
         arduboy.drawFastHLine(0, 56, 128, WHITE);
         arduboy.setCursor(2, 57);
-        arduboy.print("B1/B2:Sel B3:Ok B4:Exit");
+        arduboy.print("UP/DN:Sel  OK:Entrar");
     }
 
     void drawCatSelect() {
@@ -1064,7 +1084,7 @@ struct MathChallengeGame {
 
         arduboy.drawFastHLine(0, 56, 128, WHITE);
         arduboy.setCursor(2, 57);
-        arduboy.print("B1/B2:Sel B3:Jugar B4:Atras");
+        arduboy.print("UP/DN:Sel  OK:Jugar");
     }
 
     void drawGameScreen() {
@@ -1202,7 +1222,7 @@ struct MathChallengeGame {
 
         arduboy.drawFastHLine(0, 56, 128, WHITE);
         arduboy.setCursor(2, 57);
-        arduboy.print("B3:Reintentar B4:Menu");
+        arduboy.print("OK:Reintentar LT:Menu");
     }
 
     void drawPauseOverlay() {
@@ -1213,8 +1233,8 @@ struct MathChallengeGame {
         arduboy.setCursor(46, 19);
         arduboy.print("PAUSA");
         arduboy.setCursor(22, 29);
-        arduboy.print("B3: Reanudar");
+        arduboy.print("OK: Reanudar");
         arduboy.setCursor(22, 38);
-        arduboy.print("B4: Cambiar Modo");
+        arduboy.print("LT: Cambiar Modo");
     }
 };

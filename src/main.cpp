@@ -2,6 +2,9 @@
 #include <Wire.h>
 #include <esp_sleep.h>
 #include <Preferences.h>
+#include "driver/gpio.h"
+#include "soc/io_mux_reg.h"
+#include "soc/usb_serial_jtag_reg.h"
 #include "Arduboy2.h"
 #include "ArduboyTones.h"
 #include "ProyectoBLE.h"
@@ -6324,12 +6327,22 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 void setup() {
     sound.noTone();
 
-    // 1. Desvinculación de JTAG/SPI/Matrix y Configuración explícita (Cruceta 5 vías + BOOT)
-    const uint8_t diagPins[5] = {20, 19, 18, 15, 13};
-    for (uint8_t i = 0; i < 5; i++) {
-        gpio_reset_pin((gpio_num_t)diagPins[i]);
-        pinMode(diagPins[i], INPUT_PULLUP);
-    }
+    // 1. Desvinculación de bajo nivel de USB Serial/JTAG y configuración como GPIO pura (GPIO 13)
+    gpio_reset_pin(GPIO_NUM_13);
+    PIN_FUNC_SELECT(IO_MUX_GPIO13_REG, PIN_FUNC_GPIO);
+    #if defined(USB_SERIAL_JTAG_CONF0_REG) && defined(USB_SERIAL_JTAG_USB_PAD_ENABLE)
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    #endif
+
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pin_bit_mask = (1ULL << GPIO_NUM_13);
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf);
+
+    Arduboy2Core::initPins();
     gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
     pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
 
@@ -6376,19 +6389,47 @@ void setup() {
     Serial.begin(115200);
     delay(50);
 
-    // Desvinculación explícita de USB CDC / JTAG en GPIO 19 y 20 y configuración de los 5 pines de cruceta como INPUT_PULLUP
+    // Desvinculación explícita previa de periféricos (I2C/USB CDC/JTAG) en GPIO 13 y pines de cruceta
+    gpio_reset_pin(GPIO_NUM_13);
+    PIN_FUNC_SELECT(IO_MUX_GPIO13_REG, PIN_FUNC_GPIO);
+    #if defined(USB_SERIAL_JTAG_CONF0_REG) && defined(USB_SERIAL_JTAG_USB_PAD_ENABLE)
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    #endif
+
+    gpio_config_t io_conf_dpad = {};
+    io_conf_dpad.intr_type = GPIO_INTR_DISABLE;
+    io_conf_dpad.mode = GPIO_MODE_INPUT;
+    io_conf_dpad.pin_bit_mask = (1ULL << GPIO_NUM_13);
+    io_conf_dpad.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf_dpad.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf_dpad);
+
     const uint8_t dpadPins[5] = {ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT};
     for (uint8_t p : dpadPins) {
         gpio_reset_pin((gpio_num_t)p);
         pinMode(p, INPUT_PULLUP);
     }
 
+    // Clamp LED en GPIO 25 apagado
+    pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
+    digitalWrite(LED_PIN_CLAMP_OFF, LOW);
+
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
-    // Boot Arduboy2 Core (OLED SSD1309 on SDA=7, SCL=6 | D-Pad: UP=15, DOWN=18, RIGHT=19, LEFT=13, SELECT=20 | BOOT=9 | Buzzer=2)
+    // Boot Arduboy2 Core
     arduboy.begin();
     arduboy.setFrameRate(60);
+
+    // Reasegurar configuración de D-Pad tras inicializar periféricos
+    gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
+    pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
+    gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
+    pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
+
+    // Asegurar LED 25 apagado
+    pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
+    digitalWrite(LED_PIN_CLAMP_OFF, LOW);
 
     // Estabilización y purga de transitorios de arranque en botones
     delay(100);
@@ -6406,8 +6447,10 @@ void setup() {
     sound.tone(1760, 60); delay(70);
     sound.noTone();
 
-    Serial.println("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", UP=15, DOWN=18, RIGHT=19, LEFT=13, SELECT=20, SDA=7, SCL=6)");
-    Serial.println("[DIAG] Monitor de Cruceta Activo (115200 baudios): GPIO 15, 18, 19, 13, 20");
+    Serial.printf("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", UP=%d, DOWN=%d, RIGHT=%d, LEFT=%d, SELECT=%d, SDA=7, SCL=6)\n",
+                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT);
+    Serial.printf("[DIAG] Monitor de Cruceta Activo (115200 baudios): GPIO %d, %d, %d, %d, %d\n",
+                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT);
 }
 
 void loop() {
@@ -6439,12 +6482,12 @@ void loop() {
         melodyPlayer.stop();
         sound.noTone();
         // En reposo: omitir renderizado y físicas; monitorizar los 5 botones del D-Pad + BOOT
-        bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);           // GPIO 15
-        bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);       // GPIO 18
-        bool btnRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);     // GPIO 19
-        bool btnLeft = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);       // GPIO 13
-        bool btnSelect = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // GPIO 20
-        bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);          // GPIO 9
+        bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);           // GPIO 14 (UP)
+        bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);       // GPIO 18 (DOWN)
+        bool btnRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);     // GPIO 19 (RIGHT)
+        bool btnLeft = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);       // GPIO 5  (LEFT)
+        bool btnSelect = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // GPIO 20 (SELECT)
+        bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);          // GPIO 9  (BOOT)
 
         if (btnUp || btnDown || btnRight || btnLeft || btnSelect || boot) {
             // Despertar inmediato: Encender panel OLED y refrescar pantalla
@@ -6571,7 +6614,7 @@ void loop() {
             // Header Bar
             arduboy.fillRect(0, 0, 128, 9, WHITE);
             arduboy.setTextColor(BLACK);
-            arduboy.setCursor(8, 1);
+            arduboy.setCursor(1, 0);
             arduboy.print("ESP32-C6 RETRO ARCADE");
             arduboy.setTextColor(WHITE);
 
@@ -6723,15 +6766,15 @@ void loop() {
             arduboy.print("DIAGNOSTICO CRUCETA");
             arduboy.setTextColor(WHITE);
 
-            bool p15 = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // GPIO 15 (UP)
-            bool p18 = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);     // GPIO 18 (DOWN)
-            bool p19 = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);    // GPIO 19 (RIGHT)
-            bool p13 = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);     // GPIO 13 (LEFT)
-            bool p20 = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // GPIO 20 (SELECT / CLICK)
-            bool p9  = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);     // GPIO 9  (BOOT)
+            bool pUp    = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // UP (GPIO 14)
+            bool pDown  = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);     // DOWN (GPIO 18)
+            bool pRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);    // RIGHT (GPIO 19)
+            bool pLeft  = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);     // LEFT (GPIO 5)
+            bool pOk    = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // SELECT / CLICK (GPIO 20)
+            bool pBoot  = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);     // BOOT (GPIO 9)
 
-            // UP Box (GPIO 15)
-            if (p15) {
+            // UP Box (GPIO 14)
+            if (pUp) {
                 arduboy.fillRect(48, 11, 32, 12, WHITE);
                 arduboy.setTextColor(BLACK);
             } else {
@@ -6739,10 +6782,10 @@ void loop() {
                 arduboy.setTextColor(WHITE);
             }
             arduboy.setCursor(51, 13);
-            arduboy.print("UP 15");
+            arduboy.print("UP 14");
 
             // DOWN Box (GPIO 18)
-            if (p18) {
+            if (pDown) {
                 arduboy.fillRect(48, 37, 32, 12, WHITE);
                 arduboy.setTextColor(BLACK);
             } else {
@@ -6752,8 +6795,8 @@ void loop() {
             arduboy.setCursor(49, 39);
             arduboy.print("DN 18");
 
-            // LEFT Box (GPIO 13)
-            if (p13) {
+            // LEFT Box (GPIO 5)
+            if (pLeft) {
                 arduboy.fillRect(14, 24, 32, 12, WHITE);
                 arduboy.setTextColor(BLACK);
             } else {
@@ -6761,10 +6804,10 @@ void loop() {
                 arduboy.setTextColor(WHITE);
             }
             arduboy.setCursor(17, 26);
-            arduboy.print("LT 13");
+            arduboy.print("LT 05");
 
             // RIGHT Box (GPIO 19)
-            if (p19) {
+            if (pRight) {
                 arduboy.fillRect(82, 24, 32, 12, WHITE);
                 arduboy.setTextColor(BLACK);
             } else {
@@ -6775,7 +6818,7 @@ void loop() {
             arduboy.print("RT 19");
 
             // CENTER Box (GPIO 20)
-            if (p20) {
+            if (pOk) {
                 arduboy.fillRect(48, 24, 32, 12, WHITE);
                 arduboy.setTextColor(BLACK);
             } else {
@@ -6788,27 +6831,27 @@ void loop() {
 
             // Audio feedback per pin
             static uint8_t lastPlayedPin = 255;
-            if (p15 && lastPlayedPin != 15) { sound.tone(1200, 30); lastPlayedPin = 15; }
-            else if (p18 && lastPlayedPin != 18) { sound.tone(800, 30); lastPlayedPin = 18; }
-            else if (p13 && lastPlayedPin != 13) { sound.tone(950, 30); lastPlayedPin = 13; }
-            else if (p19 && lastPlayedPin != 19) { sound.tone(1100, 30); lastPlayedPin = 19; }
-            else if (p20 && lastPlayedPin != 20) { sound.tone(1760, 50); lastPlayedPin = 20; }
-            else if (!p15 && !p18 && !p19 && !p13 && !p20 && !p9) { lastPlayedPin = 255; }
+            if (pUp && lastPlayedPin != 14) { sound.tone(1200, 30); lastPlayedPin = 14; }
+            else if (pDown && lastPlayedPin != 18) { sound.tone(800, 30); lastPlayedPin = 18; }
+            else if (pLeft && lastPlayedPin != 5) { sound.tone(950, 30); lastPlayedPin = 5; }
+            else if (pRight && lastPlayedPin != 19) { sound.tone(1100, 30); lastPlayedPin = 19; }
+            else if (pOk && lastPlayedPin != 20) { sound.tone(1760, 50); lastPlayedPin = 20; }
+            else if (!pUp && !pDown && !pRight && !pLeft && !pOk && !pBoot) { lastPlayedPin = 255; }
 
             // Footer / Status
             arduboy.drawFastHLine(0, 51, 128, WHITE);
-            if (p15) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 15");
-            } else if (p18) {
+            if (pUp) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 14");
+            } else if (pDown) {
                 arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 18");
-            } else if (p19) {
+            } else if (pRight) {
                 arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 19");
-            } else if (p13) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 13");
-            } else if (p20) {
+            } else if (pLeft) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 05");
+            } else if (pOk) {
                 arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 20");
-            } else if (p9) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 9");
+            } else if (pBoot) {
+                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 09");
             } else {
                 arduboy.setCursor(6, 54); arduboy.print("Pulsa pin | BOOT:Menu");
             }
