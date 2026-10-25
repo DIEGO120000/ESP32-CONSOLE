@@ -199,10 +199,12 @@ struct MathChallengeGame {
 
     void silenceAudio() {
         #if defined(ESP32)
-        ledcDetach(ARDUBOY_PIN_BUZZER);
+        if (ARDUBOY_PIN_BUZZER >= 0) {
+            ledcDetach(ARDUBOY_PIN_BUZZER);
+            pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
+            digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
+        }
         #endif
-        pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
-        digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
         sound.noTone();
     }
 

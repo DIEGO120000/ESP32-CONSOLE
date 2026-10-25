@@ -7,14 +7,14 @@
 #define ARDUBOY_PIN_SDA        7    // OLED SDA -> GPIO 7
 #define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
-#define ARDUBOY_PIN_UP         19   // D-Pad UP    -> GPIO 19
-#define ARDUBOY_PIN_DOWN       20   // D-Pad DOWN  -> GPIO 20
-#define ARDUBOY_PIN_LEFT       18   // D-Pad LEFT  -> GPIO 18
-#define ARDUBOY_PIN_RIGHT      15   // D-Pad RIGHT -> GPIO 15
-#define ARDUBOY_PIN_A          13   // Central CLICK / Button A -> GPIO 13
-#define ARDUBOY_PIN_B          9    // Button B / BOOT -> GPIO 9
+#define ARDUBOY_PIN_UP         14   // D-Pad UP    -> GPIO 14
+#define ARDUBOY_PIN_DOWN       18   // D-Pad DOWN  -> GPIO 18
+#define ARDUBOY_PIN_LEFT       5    // D-Pad LEFT  -> GPIO 5
+#define ARDUBOY_PIN_RIGHT      19   // D-Pad RIGHT -> GPIO 19
+#define ARDUBOY_PIN_A          3    // Button A    -> GPIO 3 (Select)
+#define ARDUBOY_PIN_B          4    // Button B    -> GPIO 4 (Inactivo)
 
-#define ARDUBOY_PIN_BUZZER     2    // Audio Speaker on GPIO 2
+#define ARDUBOY_PIN_BUZZER     -1    // Audio Speaker disabled
 
 #define OLED_ADDR              0x3C
 #define SCREEN_WIDTH           128
@@ -53,8 +53,10 @@ public:
         pinMode(ARDUBOY_PIN_A, INPUT_PULLUP);
         pinMode(ARDUBOY_PIN_B, INPUT_PULLUP);
 
-        pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
-        noTone(ARDUBOY_PIN_BUZZER);
+        if (ARDUBOY_PIN_BUZZER >= 0) {
+            pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
+            noTone(ARDUBOY_PIN_BUZZER);
+        }
 
         Wire.begin(ARDUBOY_PIN_SDA, ARDUBOY_PIN_SCL);
         Wire.setClock(400000);

@@ -12,8 +12,82 @@
 #include "hangman_words.h"
 #include "MathChallenge.h"
 
+// =============================================================================
+// SYSTEM AUDIO & VOLUME MANAGEMENT (GPIO 2 - BUZZER)
+// =============================================================================
+enum VolumeLevel {
+    VOL_MUTE = 0,
+    VOL_BAJO,
+    VOL_MEDIO,
+    VOL_ALTO
+};
+
+uint8_t sysVolume = VOL_ALTO;
+const char* const volumeLabels[] = {"MUTE", "BAJO", "MEDIO", "ALTO"};
+
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
+
+// =============================================================================
+// SYSTEM CONFIGURATION & HARDWARE PERSISTENCE (NVS "sys_cfg")
+// =============================================================================
+uint8_t sysBrightness = 80; // 10% a 100% (pasos de 10%)
+
+void applyBrightness(uint8_t percent) {
+    if (percent < 10) percent = 10;
+    if (percent > 100) percent = 100;
+    sysBrightness = percent;
+    uint8_t contrastVal = (uint8_t)((sysBrightness * 255) / 100);
+    Arduboy2Core::setContrast(contrastVal);
+}
+
+void loadSystemSettings() {
+    Preferences prefs;
+    if (prefs.begin("sys_cfg", true)) {
+        sysBrightness = prefs.getUChar("brightness", 80);
+        sysVolume = prefs.getUChar("volume", VOL_ALTO);
+        prefs.end();
+    } else {
+        sysBrightness = 80;
+        sysVolume = VOL_ALTO;
+    }
+
+    if (sysBrightness < 10 || sysBrightness > 100) sysBrightness = 80;
+    if (sysVolume > 3) sysVolume = VOL_ALTO;
+
+    applyBrightness(sysBrightness);
+    sound.setVolume(sysVolume);
+}
+
+void saveSystemSettings() {
+    Preferences prefs;
+    if (prefs.begin("sys_cfg", false)) {
+        prefs.putUChar("brightness", sysBrightness);
+        prefs.putUChar("volume", sysVolume);
+        prefs.end();
+    }
+}
+
+void getBatteryStatus(float &voltage, int &percentage) {
+    analogSetAttenuation(ADC_11db);
+    uint32_t rawMv = analogReadMilliVolts(0);
+
+    float vBat = 0.0f;
+    if (rawMv >= 400 && rawMv <= 2500) {
+        vBat = (rawMv * 2.0f) / 1000.0f; // Divisor de tensión 2:1 en GPIO 0
+    } else if (rawMv > 2500) {
+        vBat = rawMv / 1000.0f;
+    } else {
+        vBat = 4.12f; // Alimentación por USB / lectura nominal
+    }
+
+    int pct = (int)((vBat - 3.30f) / (4.20f - 3.30f) * 100.0f);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+
+    voltage = vBat;
+    percentage = pct;
+}
 
 // =============================================================================
 // RGB LED SYSTEM (GPIO 8 - WS2812 INTEGRATED)
@@ -249,11 +323,15 @@ struct PingPongGame {
     bool isNewRecord;
     float targetCpuY;
     uint8_t launchCooldown;
+    unsigned long submenuEnterTime;
+    bool exitRequested;
 
     void init() {
         melodyPlayer.stop();
         mode = PP_MODE_SUBMENU;
         submenuCursor = 0;
+        submenuEnterTime = millis();
+        exitRequested = false;
     }
 
     void initNormal() {
@@ -327,16 +405,26 @@ struct PingPongGame {
     }
 
     void updateSubmenu() {
-        if (arduboy.justPressed(UP_BUTTON)) {
+        // Navegación bidireccional accesible:
+        // UP / LEFT -> Modo Normal (0)
+        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
             sound.tone(880, 15);
-            submenuCursor--;
-            if (submenuCursor < 0) submenuCursor = 1;
+            submenuCursor = 0;
         }
-        if (arduboy.justPressed(DOWN_BUTTON)) {
+        // DOWN / RIGHT -> Modo Invertido (1)
+        if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
             sound.tone(700, 15);
-            submenuCursor++;
-            if (submenuCursor > 1) submenuCursor = 0;
+            submenuCursor = 1;
         }
+
+        // Botón B: Regresar al Menú Principal
+        if (arduboy.justPressed(B_BUTTON)) {
+            sound.tone(1400, 30);
+            exitRequested = true;
+            return;
+        }
+
+        // Botón A o Click Central: Confirmar y arrancar el modo seleccionado
         if (arduboy.justPressed(A_BUTTON)) {
             sound.tone(1760, 40);
             if (submenuCursor == 0) {
@@ -379,7 +467,7 @@ struct PingPongGame {
         // Bottom Navigation Bar
         arduboy.drawFastHLine(0, 54, 128, WHITE);
         arduboy.setCursor(2, 56);
-        arduboy.print("B1/B2:Mover  B3/B4:OK");
+        arduboy.print("D-PAD:Mover  A:OK  B:Menu");
     }
 
     void updateNormal() {
@@ -6239,10 +6327,13 @@ enum SystemState {
     STATE_HANGMAN,
     STATE_TRIS,
     STATE_MATH_CHALLENGE,
-    STATE_PIN_DIAGNOSTIC
+    STATE_PIN_DIAGNOSTIC,
+    STATE_SETTINGS
 };
 
 SystemState currentState = STATE_MENU;
+SystemState previousStateBeforeSettings = STATE_MENU;
+int8_t settingsCursor = 0;
 int8_t menuCursor = 0;
 const char* menuItems[] = {
     "1. Ping Pong",
@@ -6304,13 +6395,8 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
     arduboy.display();
     Arduboy2Core::sendCommand(SSD1306_DISPLAYOFF);
 
-    // Turn off buzzer and RGB LED (Full detachment & GND clamp)
+    // Turn off sound and RGB LED
     sound.noTone();
-    #if defined(ESP32)
-    ledcDetach(ARDUBOY_PIN_BUZZER);
-    #endif
-    pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
-    digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
     // Configure wake-up on GPIO 9 (BOOT button pressed LOW)
@@ -6327,21 +6413,7 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 void setup() {
     sound.noTone();
 
-    // 1. Desvinculación de bajo nivel de USB Serial/JTAG y configuración como GPIO pura (GPIO 13)
-    gpio_reset_pin(GPIO_NUM_13);
-    PIN_FUNC_SELECT(IO_MUX_GPIO13_REG, PIN_FUNC_GPIO);
-    #if defined(USB_SERIAL_JTAG_CONF0_REG) && defined(USB_SERIAL_JTAG_USB_PAD_ENABLE)
-    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
-    #endif
-
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = (1ULL << GPIO_NUM_13);
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io_conf);
-
+    // 1. Inicialización y aislamiento de todos los pines de control (Cruceta 5 vías + Botones A/B + BOOT)
     Arduboy2Core::initPins();
     gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
     pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
@@ -6389,47 +6461,18 @@ void setup() {
     Serial.begin(115200);
     delay(50);
 
-    // Desvinculación explícita previa de periféricos (I2C/USB CDC/JTAG) en GPIO 13 y pines de cruceta
-    gpio_reset_pin(GPIO_NUM_13);
-    PIN_FUNC_SELECT(IO_MUX_GPIO13_REG, PIN_FUNC_GPIO);
-    #if defined(USB_SERIAL_JTAG_CONF0_REG) && defined(USB_SERIAL_JTAG_USB_PAD_ENABLE)
-    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
-    #endif
+    // Boot Arduboy2 Core (inicializa bus I2C en SDA=7, SCL=6 y pantalla OLED)
+    arduboy.begin();
+    arduboy.setFrameRate(60);
 
-    gpio_config_t io_conf_dpad = {};
-    io_conf_dpad.intr_type = GPIO_INTR_DISABLE;
-    io_conf_dpad.mode = GPIO_MODE_INPUT;
-    io_conf_dpad.pin_bit_mask = (1ULL << GPIO_NUM_13);
-    io_conf_dpad.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf_dpad.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io_conf_dpad);
-
-    const uint8_t dpadPins[5] = {ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT};
-    for (uint8_t p : dpadPins) {
-        gpio_reset_pin((gpio_num_t)p);
-        pinMode(p, INPUT_PULLUP);
-    }
-
-    // Clamp LED en GPIO 25 apagado
-    pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
-    digitalWrite(LED_PIN_CLAMP_OFF, LOW);
+    // Asegurar configuración limpia y aislamiento de todos los pines de control
+    Arduboy2Core::initPins();
 
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
-    // Boot Arduboy2 Core
-    arduboy.begin();
-    arduboy.setFrameRate(60);
-
-    // Reasegurar configuración de D-Pad tras inicializar periféricos
-    gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
-    pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
-    gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
-    pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
-
-    // Asegurar LED 25 apagado
-    pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
-    digitalWrite(LED_PIN_CLAMP_OFF, LOW);
+    // Cargar y aplicar brillo de pantalla y volumen desde NVS ("sys_cfg")
+    loadSystemSettings();
 
     // Estabilización y purga de transitorios de arranque en botones
     delay(100);
@@ -6443,25 +6486,228 @@ void setup() {
     menuCursor = 0;
     lastActivityTime = millis();
 
-    sound.tone(880, 40); delay(50);
-    sound.tone(1760, 60); delay(70);
-    sound.noTone();
+    Serial.printf("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", UP=%d, DOWN=%d, RIGHT=%d, LEFT=%d, CTR=%d, A=%d, B=%d, SDA=7, SCL=6)\n",
+                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, PIN_NAV_CENTER, PIN_BUTTON_A, PIN_BUTTON_B);
+    Serial.printf("[DIAG] Monitor de Controles Activo (115200 baudios): D-Pad(UP=%d,DOWN=%d,RIGHT=%d,LEFT=%d), Center(20), A(%d), B(%d)\n",
+                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, PIN_BUTTON_A, PIN_BUTTON_B);
+}
 
-    Serial.printf("[ESP32-C6] Retro Console Ready -> Menu Principal (OLED SSD1309 2.42\", UP=%d, DOWN=%d, RIGHT=%d, LEFT=%d, SELECT=%d, SDA=7, SCL=6)\n",
-                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT);
-    Serial.printf("[DIAG] Monitor de Cruceta Activo (115200 baudios): GPIO %d, %d, %d, %d, %d\n",
-                  ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT);
+void launchSelectedGame() {
+    sound.tone(1760, 50);
+    gamePaused = false;
+    if (menuCursor == 0) { pingPong.init(); currentState = STATE_PING_PONG; }
+    else if (menuCursor == 1) { breakout.init(); currentState = STATE_BREAKOUT; }
+    else if (menuCursor == 2) { spaceInvaders.init(); currentState = STATE_SPACE_INVADERS; }
+    else if (menuCursor == 3) { airCombat.init(); currentState = STATE_1943; }
+    else if (menuCursor == 4) { flappy.init(); currentState = STATE_FLAPPY_BIRD; }
+    else if (menuCursor == 5) { snake.init(); currentState = STATE_SNAKE; }
+    else if (menuCursor == 6) { jumpMan.init(); currentState = STATE_JUMP_MAN; }
+    else if (menuCursor == 7) { proyectoBLE.init(); currentState = STATE_PROYECTO_BLE; }
+    else if (menuCursor == 8) { game2048.init(); currentState = STATE_2048; }
+    else if (menuCursor == 9) { trexRunner.init(); currentState = STATE_TREX_RUNNER; }
+    else if (menuCursor == 10) { ticTacToe.init(); currentState = STATE_TIC_TAC_TOE; }
+    else if (menuCursor == 11) { brainduTrain.init(); currentState = STATE_BRAINDU_TRAIN; }
+    else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
+    else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
+    else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
+    else if (menuCursor == 15) { currentState = STATE_PIN_DIAGNOSTIC; }
+}
+
+// -------------------------------------------------------------------------
+// TRANSICIÓN HORIZONTAL (SLIDE) ESTILO TAMAGOTCHI: MENU <-> AJUSTES
+// -------------------------------------------------------------------------
+static uint8_t slideBufMenu[1024];
+static uint8_t slideBufSettings[1024];
+
+void drawMainMenuScreen() {
+    // Header Bar
+    arduboy.fillRect(0, 0, 128, 9, WHITE);
+    arduboy.setTextColor(BLACK);
+    arduboy.setCursor(1, 0);
+    arduboy.print("ESP32-C6 RETRO ARCADE");
+    arduboy.setTextColor(WHITE);
+
+    // Menu Viewport (Displays 5 items with smooth scrolling)
+    uint8_t startIdx = 0;
+    if (menuCursor > 3) startIdx = menuCursor - 3;
+    if (startIdx + 5 > MENU_COUNT) startIdx = MENU_COUNT - 5;
+
+    for (uint8_t i = 0; i < 5; i++) {
+        uint8_t itemIdx = startIdx + i;
+        int16_t y = 11 + (i * 9);
+        if (itemIdx == menuCursor) {
+            arduboy.fillRect(2, y - 1, 124, 9, WHITE);
+            arduboy.setTextColor(BLACK);
+            arduboy.setCursor(6, y);
+            arduboy.print("> ");
+            arduboy.print(menuItems[itemIdx]);
+            arduboy.setTextColor(WHITE);
+        } else {
+            arduboy.setCursor(6, y);
+            arduboy.print("  ");
+            arduboy.print(menuItems[itemIdx]);
+        }
+    }
+
+    // Bottom Navigation Bar
+    arduboy.drawFastHLine(0, 56, 128, WHITE);
+    arduboy.setCursor(2, 57);
+    arduboy.print("A:JUGAR | <LEFT:AJUSTES");
+}
+
+void drawSettingsScreen() {
+    // Header Bar
+    arduboy.fillRect(0, 0, 128, 9, WHITE);
+    arduboy.setTextColor(BLACK);
+    arduboy.setCursor(12, 1);
+    arduboy.print("AJUSTES DE SISTEMA");
+    arduboy.setTextColor(WHITE);
+
+    // Item 0: Brillo Pantalla (10% a 100%)
+    int16_t y0 = 12;
+    if (settingsCursor == 0) {
+        arduboy.fillRect(2, y0 - 1, 124, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+    }
+    arduboy.setCursor(4, y0);
+    arduboy.printf("1.BRILLO : [ %3d%% ]", sysBrightness);
+    arduboy.setTextColor(WHITE);
+    // Barra gráfica de brillo
+    uint8_t barW = (uint8_t)map(sysBrightness, 10, 100, 6, 80);
+    arduboy.drawRect(24, y0 + 9, 82, 3, WHITE);
+    arduboy.fillRect(25, y0 + 10, barW, 1, WHITE);
+
+    // Item 1: Volumen / Audio
+    int16_t y1 = 26;
+    if (settingsCursor == 1) {
+        arduboy.fillRect(2, y1 - 1, 124, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+    }
+    arduboy.setCursor(4, y1);
+    arduboy.printf("2.VOLUMEN: [ %-5s ]", volumeLabels[sysVolume]);
+    arduboy.setTextColor(WHITE);
+
+    // Item 2: Batería (Lectura ADC en GPIO 0 - Porcentaje %)
+    int16_t y2 = 37;
+    float vBat = 0.0f;
+    int batPct = 0;
+    getBatteryStatus(vBat, batPct);
+    uint8_t colorItem2 = WHITE;
+    if (settingsCursor == 2) {
+        arduboy.fillRect(2, y2 - 1, 124, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+        colorItem2 = BLACK;
+    }
+    arduboy.setCursor(4, y2);
+    arduboy.printf("3.BATERIA: %3d%%", batPct);
+    arduboy.setTextColor(WHITE);
+
+    // Icono visual de nivel de batería
+    arduboy.drawRect(104, y2, 14, 7, colorItem2);
+    arduboy.drawFastVLine(118, y2 + 2, 3, colorItem2);
+    uint8_t batFill = (uint8_t)map(batPct, 0, 100, 0, 10);
+    if (batFill > 0) {
+        arduboy.fillRect(106, y2 + 2, batFill, 3, colorItem2);
+    }
+
+    // Item 3: Salir / Guardar
+    int16_t y3 = 48;
+    if (settingsCursor == 3) {
+        arduboy.fillRect(2, y3 - 1, 124, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+        arduboy.setCursor(10, y3);
+        arduboy.print("> GUARDAR Y SALIR <");
+        arduboy.setTextColor(WHITE);
+    } else {
+        arduboy.setCursor(12, y3);
+        arduboy.print("[ GUARDAR Y SALIR ]");
+    }
+
+    // Footer
+    arduboy.drawFastHLine(0, 56, 128, WHITE);
+    arduboy.setCursor(4, 57);
+    arduboy.print("B:- A:+ | RIGHT:MENU");
+}
+
+void transitionMenuToSettings() {
+    sound.tone(1100, 25);
+
+    // 1. Capturar pantalla de Menú
+    arduboy.clear();
+    drawMainMenuScreen();
+    memcpy(slideBufMenu, arduboy.getBuffer(), 1024);
+
+    // 2. Capturar pantalla de Ajustes
+    arduboy.clear();
+    drawSettingsScreen();
+    memcpy(slideBufSettings, arduboy.getBuffer(), 1024);
+
+    // 3. Desplazamiento horizontal fluido (Menú sale hacia la izquierda, Ajustes entra desde la derecha)
+    // 8 pasos de 16 píxeles a través de I2C 400kHz = ~184ms
+    for (int16_t offset = 16; offset <= 128; offset += 16) {
+        uint8_t* dst = arduboy.getBuffer();
+        for (uint8_t page = 0; page < 8; page++) {
+            uint8_t* pageDst = dst + (page * 128);
+            uint8_t* menuSrc = slideBufMenu + (page * 128);
+            uint8_t* settSrc = slideBufSettings + (page * 128);
+
+            if (offset < 128) {
+                memcpy(pageDst, menuSrc + offset, 128 - offset);
+            }
+            memcpy(pageDst + (128 - offset), settSrc, offset);
+        }
+        arduboy.display();
+        yield();
+        delay(1);
+    }
+    settingsCursor = 0;
+    currentState = STATE_SETTINGS;
+}
+
+void transitionSettingsToMenu() {
+    saveSystemSettings();
+    sound.tone(880, 25);
+
+    // 1. Capturar pantalla de Ajustes
+    arduboy.clear();
+    drawSettingsScreen();
+    memcpy(slideBufSettings, arduboy.getBuffer(), 1024);
+
+    // 2. Capturar pantalla de Menú
+    arduboy.clear();
+    drawMainMenuScreen();
+    memcpy(slideBufMenu, arduboy.getBuffer(), 1024);
+
+    // 3. Desplazamiento horizontal invertido (Ajustes sale hacia la derecha, Menú entra desde la izquierda)
+    for (int16_t offset = 16; offset <= 128; offset += 16) {
+        uint8_t* dst = arduboy.getBuffer();
+        for (uint8_t page = 0; page < 8; page++) {
+            uint8_t* pageDst = dst + (page * 128);
+            uint8_t* menuSrc = slideBufMenu + (page * 128);
+            uint8_t* settSrc = slideBufSettings + (page * 128);
+
+            memcpy(pageDst, menuSrc + (128 - offset), offset);
+            if (offset < 128) {
+                memcpy(pageDst + offset, settSrc, 128 - offset);
+            }
+        }
+        arduboy.display();
+        yield();
+        delay(1);
+    }
+    gamePaused = false;
+    currentState = STATE_MENU;
 }
 
 void loop() {
     yield();
 
     // -------------------------------------------------------------------------
-    // DIAGNÓSTICO EN TIEMPO REAL POR SERIAL (115200) - LECTURA DE CRUCETA
+    // DIAGNÓSTICO EN TIEMPO REAL POR SERIAL (115200) - LECTURA DE CONTROLES
     // -------------------------------------------------------------------------
-    const uint8_t diagPins[5] = {ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, ARDUBOY_PIN_SELECT};
-    static unsigned long lastPinTrigger[5] = {0, 0, 0, 0, 0};
-    for (uint8_t i = 0; i < 5; i++) {
+    const uint8_t diagPins[7] = {ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT, PIN_NAV_CENTER, PIN_BUTTON_A, PIN_BUTTON_B};
+    static unsigned long lastPinTrigger[7] = {0, 0, 0, 0, 0, 0, 0};
+    for (uint8_t i = 0; i < 7; i++) {
         if (digitalRead(diagPins[i]) == LOW) {
             unsigned long now = millis();
             if (now - lastPinTrigger[i] >= 150) {
@@ -6481,17 +6727,20 @@ void loop() {
     if (isScreenSleeping) {
         melodyPlayer.stop();
         sound.noTone();
-        // En reposo: omitir renderizado y físicas; monitorizar los 5 botones del D-Pad + BOOT
+        // En reposo: omitir renderizado y físicas; monitorizar controles NES + D-Pad + BOOT
         bool btnUp = (digitalRead(ARDUBOY_PIN_UP) == LOW);           // GPIO 14 (UP)
         bool btnDown = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);       // GPIO 18 (DOWN)
         bool btnRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);     // GPIO 19 (RIGHT)
         bool btnLeft = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);       // GPIO 5  (LEFT)
-        bool btnSelect = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // GPIO 20 (SELECT)
+        bool btnSelect = (digitalRead(PIN_NAV_CENTER) == LOW);       // GPIO 20 (CLICK CENTRAL)
+        bool btnA = (digitalRead(PIN_BUTTON_A) == LOW);              // GPIO 3  (A - OK / SELECT)
+        bool btnB = (digitalRead(PIN_BUTTON_B) == LOW);              // GPIO 4  (B - INACTIVO)
         bool boot = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);          // GPIO 9  (BOOT)
 
-        if (btnUp || btnDown || btnRight || btnLeft || btnSelect || boot) {
-            // Despertar inmediato: Encender panel OLED y refrescar pantalla
+        if (btnUp || btnDown || btnRight || btnLeft || btnSelect || btnA || btnB || boot) {
+            // Despertar inmediato: Encender panel OLED, restaurar brillo y refrescar pantalla
             Arduboy2Core::sendCommand(SSD1306_DISPLAYON);
+            applyBrightness(sysBrightness);
             arduboy.display();
             sound.tone(1200, 25);
             isScreenSleeping = false;
@@ -6539,7 +6788,7 @@ void loop() {
                     trisGame.onBootShortPress();
                 } else if (currentState == STATE_MATH_CHALLENGE) {
                     mathChallenge.onBootShortPress();
-                } else if (currentState != STATE_MENU) {
+                } else if (currentState != STATE_MENU && currentState != STATE_SETTINGS) {
                     gamePaused = !gamePaused;
                     if (gamePaused) {
                         sound.tone(600, 30);
@@ -6581,8 +6830,22 @@ void loop() {
 
     arduboy.clear();
 
-    // Universal Exit Combo: Hold B1 (GPIO 14) + B4 (GPIO 18) or B3 (GPIO 7) + B4 (GPIO 18) >= 450ms returns to menu
-    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC) {
+    // Click Central Cruceta (GPIO 20): Toggle Pausa EXCLUSIVAMENTE dentro de juegos
+    if (currentState != STATE_MENU && currentState != STATE_SETTINGS && currentState != STATE_PIN_DIAGNOSTIC) {
+        if (arduboy.justPressed(CLICK_BUTTON)) {
+            gamePaused = !gamePaused;
+            if (gamePaused) {
+                melodyPlayer.stop();
+                sound.noTone();
+                sound.tone(600, 30);
+            } else {
+                sound.tone(900, 30);
+            }
+        }
+    }
+
+    // Universal Exit Combo: Hold A + B (o LEFT + B) >= 450ms returns to menu
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS) {
         bool comboHeld = (arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
                          (arduboy.pressed(A_BUTTON) && arduboy.pressed(B_BUTTON));
         if (comboHeld) {
@@ -6611,40 +6874,9 @@ void loop() {
         case STATE_MENU: {
             gamePaused = false;
 
-            // Header Bar
-            arduboy.fillRect(0, 0, 128, 9, WHITE);
-            arduboy.setTextColor(BLACK);
-            arduboy.setCursor(1, 0);
-            arduboy.print("ESP32-C6 RETRO ARCADE");
-            arduboy.setTextColor(WHITE);
+            drawMainMenuScreen();
 
-            // Menu Viewport (Displays 5 items with smooth scrolling)
-            uint8_t startIdx = 0;
-            if (menuCursor > 3) startIdx = menuCursor - 3;
-            if (startIdx + 5 > MENU_COUNT) startIdx = MENU_COUNT - 5;
-
-            for (uint8_t i = 0; i < 5; i++) {
-                uint8_t itemIdx = startIdx + i;
-                int16_t y = 11 + (i * 9);
-                if (itemIdx == menuCursor) {
-                    arduboy.fillRect(2, y - 1, 124, 9, WHITE);
-                    arduboy.setTextColor(BLACK);
-                    arduboy.setCursor(6, y);
-                    arduboy.print("> ");
-                    arduboy.print(menuItems[itemIdx]);
-                    arduboy.setTextColor(WHITE);
-                } else {
-                    arduboy.setCursor(6, y);
-                    arduboy.print("  ");
-                    arduboy.print(menuItems[itemIdx]);
-                }
-            }
-
-            // Bottom Navigation Bar
-            arduboy.drawFastHLine(0, 56, 128, WHITE);
-            arduboy.setCursor(2, 57);
-            arduboy.print("B1/B2:Mover  B3:Jugar");
-
+            // Navegación Vertical: EXCLUSIVAMENTE con la cruceta (UP y DOWN)
             if (arduboy.justPressed(UP_BUTTON)) {
                 sound.tone(880, 15);
                 menuCursor--;
@@ -6656,30 +6888,25 @@ void loop() {
                 if (menuCursor >= MENU_COUNT) menuCursor = 0;
             }
 
+            // Transición de deslizamiento horizontal hacia Ajustes al pulsar LEFT
+            if (arduboy.justPressed(LEFT_BUTTON)) {
+                transitionMenuToSettings();
+                break;
+            }
+
+            // Confirmación y lanzamiento al presionar Botón A (GPIO 3)
             if (arduboy.justPressed(A_BUTTON)) {
-                sound.tone(1760, 50);
-                gamePaused = false;
-                if (menuCursor == 0) { pingPong.init(); currentState = STATE_PING_PONG; }
-                else if (menuCursor == 1) { breakout.init(); currentState = STATE_BREAKOUT; }
-                else if (menuCursor == 2) { spaceInvaders.init(); currentState = STATE_SPACE_INVADERS; }
-                else if (menuCursor == 3) { airCombat.init(); currentState = STATE_1943; }
-                else if (menuCursor == 4) { flappy.init(); currentState = STATE_FLAPPY_BIRD; }
-                else if (menuCursor == 5) { snake.init(); currentState = STATE_SNAKE; }
-                else if (menuCursor == 6) { jumpMan.init(); currentState = STATE_JUMP_MAN; }
-                else if (menuCursor == 7) { proyectoBLE.init(); currentState = STATE_PROYECTO_BLE; }
-                else if (menuCursor == 8) { game2048.init(); currentState = STATE_2048; }
-                else if (menuCursor == 9) { trexRunner.init(); currentState = STATE_TREX_RUNNER; }
-                else if (menuCursor == 10) { ticTacToe.init(); currentState = STATE_TIC_TAC_TOE; }
-                else if (menuCursor == 11) { brainduTrain.init(); currentState = STATE_BRAINDU_TRAIN; }
-                else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
-                else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
-                else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
-                else if (menuCursor == 15) { currentState = STATE_PIN_DIAGNOSTIC; }
+                launchSelectedGame();
             }
             break;
         }
 
         case STATE_PING_PONG:
+            if (pingPong.exitRequested) {
+                pingPong.exitRequested = false;
+                currentState = STATE_MENU;
+                break;
+            }
             if (!gamePaused) pingPong.update();
             pingPong.draw();
             break;
@@ -6762,112 +6989,189 @@ void loop() {
             // Header Bar
             arduboy.fillRect(0, 0, 128, 9, WHITE);
             arduboy.setTextColor(BLACK);
-            arduboy.setCursor(6, 1);
-            arduboy.print("DIAGNOSTICO CRUCETA");
+            arduboy.setCursor(4, 1);
+            arduboy.print("DIAGNOSTICO DE CONTROLES");
             arduboy.setTextColor(WHITE);
 
-            bool pUp    = (digitalRead(ARDUBOY_PIN_UP) == LOW);       // UP (GPIO 14)
-            bool pDown  = (digitalRead(ARDUBOY_PIN_DOWN) == LOW);     // DOWN (GPIO 18)
-            bool pRight = (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);    // RIGHT (GPIO 19)
-            bool pLeft  = (digitalRead(ARDUBOY_PIN_LEFT) == LOW);     // LEFT (GPIO 5)
-            bool pOk    = (digitalRead(ARDUBOY_PIN_SELECT) == LOW);   // SELECT / CLICK (GPIO 20)
-            bool pBoot  = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);     // BOOT (GPIO 9)
+            bool pUp    = arduboy.pressed(UP_BUTTON) || (digitalRead(ARDUBOY_PIN_UP) == LOW);
+            bool pDown  = arduboy.pressed(DOWN_BUTTON) || (digitalRead(ARDUBOY_PIN_DOWN) == LOW);
+            bool pRight = arduboy.pressed(RIGHT_BUTTON) || (digitalRead(ARDUBOY_PIN_RIGHT) == LOW);
+            bool pLeft  = arduboy.pressed(LEFT_BUTTON) || (digitalRead(ARDUBOY_PIN_LEFT) == LOW);
+            bool pCtr   = arduboy.pressed(SYSTEM_MENU_BUTTON) || (digitalRead(PIN_NAV_CENTER) == LOW);
+            bool pA     = arduboy.pressed(A_BUTTON) || (digitalRead(PIN_BUTTON_A) == LOW);
+            bool pB     = arduboy.pressed(B_BUTTON) || (digitalRead(PIN_BUTTON_B) == LOW);
+            bool pBoot  = (digitalRead(ARDUBOY_PIN_BOOT) == LOW);
 
-            // UP Box (GPIO 14)
-            if (pUp) {
-                arduboy.fillRect(48, 11, 32, 12, WHITE);
-                arduboy.setTextColor(BLACK);
-            } else {
-                arduboy.drawRect(48, 11, 32, 12, WHITE);
-                arduboy.setTextColor(WHITE);
+            // Escaneo en vivo de todos los pines de control y candidatos
+            int activeScanPin = -1;
+            const uint8_t scanAll[] = {23, 22, 12, 21, 1, 0};
+            for (uint8_t sp : scanAll) {
+                if ((Arduboy2Core::validPullupMask & (1UL << sp)) && digitalRead(sp) == LOW) {
+                    activeScanPin = sp;
+                    break;
+                }
             }
-            arduboy.setCursor(51, 13);
-            arduboy.print("UP 14");
 
-            // DOWN Box (GPIO 18)
-            if (pDown) {
-                arduboy.fillRect(48, 37, 32, 12, WHITE);
-                arduboy.setTextColor(BLACK);
-            } else {
-                arduboy.drawRect(48, 37, 32, 12, WHITE);
-                arduboy.setTextColor(WHITE);
-            }
-            arduboy.setCursor(49, 39);
-            arduboy.print("DN 18");
+            // D-Pad: UP (GPIO 14)
+            if (pUp) { arduboy.fillRect(26, 12, 22, 11, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(26, 12, 22, 11, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(28, 14); arduboy.print("U14");
 
-            // LEFT Box (GPIO 5)
-            if (pLeft) {
-                arduboy.fillRect(14, 24, 32, 12, WHITE);
-                arduboy.setTextColor(BLACK);
-            } else {
-                arduboy.drawRect(14, 24, 32, 12, WHITE);
-                arduboy.setTextColor(WHITE);
-            }
-            arduboy.setCursor(17, 26);
-            arduboy.print("LT 05");
+            // D-Pad: CTR / OK (GPIO 20)
+            if (pCtr) { arduboy.fillRect(26, 24, 22, 11, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(26, 24, 22, 11, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(28, 26); arduboy.print("C20");
 
-            // RIGHT Box (GPIO 19)
-            if (pRight) {
-                arduboy.fillRect(82, 24, 32, 12, WHITE);
-                arduboy.setTextColor(BLACK);
-            } else {
-                arduboy.drawRect(82, 24, 32, 12, WHITE);
-                arduboy.setTextColor(WHITE);
-            }
-            arduboy.setCursor(85, 26);
-            arduboy.print("RT 19");
+            // D-Pad: DOWN (GPIO 18)
+            if (pDown) { arduboy.fillRect(26, 36, 22, 11, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(26, 36, 22, 11, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(28, 38); arduboy.print("D18");
 
-            // CENTER Box (GPIO 20)
-            if (pOk) {
-                arduboy.fillRect(48, 24, 32, 12, WHITE);
-                arduboy.setTextColor(BLACK);
-            } else {
-                arduboy.drawRect(48, 24, 32, 12, WHITE);
-                arduboy.setTextColor(WHITE);
-            }
-            arduboy.setCursor(51, 26);
-            arduboy.print("OK 20");
+            // D-Pad: LEFT (GPIO 05)
+            if (pLeft) { arduboy.fillRect(3, 24, 22, 11, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(3, 24, 22, 11, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(5, 26); arduboy.print("L05");
+
+            // D-Pad: RIGHT (GPIO 19)
+            if (pRight) { arduboy.fillRect(49, 24, 22, 11, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(49, 24, 22, 11, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(51, 26); arduboy.print("R19");
+
+            // Action Buttons: BOTON B (GPIO 04 - INACTIVO)
+            if (pB) { arduboy.fillRect(78, 22, 22, 13, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(78, 22, 22, 13, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(81, 25); arduboy.print("B04");
+
+            // Action Buttons: BOTON A (GPIO 03 - OK / SELECCIONAR)
+            if (pA) { arduboy.fillRect(103, 16, 22, 13, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(103, 16, 22, 13, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(106, 19); arduboy.print("A03");
+
+            // BOOT (GPIO 9)
+            if (pBoot) { arduboy.fillRect(80, 37, 44, 10, WHITE); arduboy.setTextColor(BLACK); }
+            else { arduboy.drawRect(80, 37, 44, 10, WHITE); arduboy.setTextColor(WHITE); }
+            arduboy.setCursor(84, 39); arduboy.print("BOOT 9");
             arduboy.setTextColor(WHITE);
 
             // Audio feedback per pin
             static uint8_t lastPlayedPin = 255;
-            if (pUp && lastPlayedPin != 14) { sound.tone(1200, 30); lastPlayedPin = 14; }
-            else if (pDown && lastPlayedPin != 18) { sound.tone(800, 30); lastPlayedPin = 18; }
-            else if (pLeft && lastPlayedPin != 5) { sound.tone(950, 30); lastPlayedPin = 5; }
-            else if (pRight && lastPlayedPin != 19) { sound.tone(1100, 30); lastPlayedPin = 19; }
-            else if (pOk && lastPlayedPin != 20) { sound.tone(1760, 50); lastPlayedPin = 20; }
-            else if (!pUp && !pDown && !pRight && !pLeft && !pOk && !pBoot) { lastPlayedPin = 255; }
+            if (pUp && lastPlayedPin != ARDUBOY_PIN_UP) { sound.tone(1200, 30); lastPlayedPin = ARDUBOY_PIN_UP; }
+            else if (pDown && lastPlayedPin != ARDUBOY_PIN_DOWN) { sound.tone(800, 30); lastPlayedPin = ARDUBOY_PIN_DOWN; }
+            else if (pLeft && lastPlayedPin != ARDUBOY_PIN_LEFT) { sound.tone(950, 30); lastPlayedPin = ARDUBOY_PIN_LEFT; }
+            else if (pRight && lastPlayedPin != ARDUBOY_PIN_RIGHT) { sound.tone(1100, 30); lastPlayedPin = ARDUBOY_PIN_RIGHT; }
+            else if (pCtr && lastPlayedPin != PIN_NAV_CENTER) { sound.tone(1400, 30); lastPlayedPin = PIN_NAV_CENTER; }
+            else if (pA && lastPlayedPin != PIN_BUTTON_A) { sound.tone(1760, 40); lastPlayedPin = PIN_BUTTON_A; }
+            else if (pB && lastPlayedPin != PIN_BUTTON_B) { sound.tone(1500, 40); lastPlayedPin = PIN_BUTTON_B; }
+            else if (pBoot && lastPlayedPin != 9) { sound.tone(600, 30); lastPlayedPin = 9; }
+            else if (!pUp && !pDown && !pRight && !pLeft && !pCtr && !pA && !pB && !pBoot) { lastPlayedPin = 255; }
 
             // Footer / Status
-            arduboy.drawFastHLine(0, 51, 128, WHITE);
-            if (pUp) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 14");
+            arduboy.drawFastHLine(0, 50, 128, WHITE);
+            if (activeScanPin >= 0) {
+                arduboy.setCursor(4, 53);
+                arduboy.printf("PIN ACTIVO: GPIO %02d!", activeScanPin);
+            } else if (pA) {
+                arduboy.setCursor(4, 53); arduboy.print("BOTON A: GPIO 03 (OK/+)");
+            } else if (pB) {
+                arduboy.setCursor(4, 53); arduboy.print("BOTON B: GPIO 04 (B/-)");
+            } else if (pCtr) {
+                arduboy.setCursor(4, 53); arduboy.print("CLICK CRUCETA: GPIO 20");
+            } else if (pUp) {
+                arduboy.setCursor(4, 53); arduboy.print("CRUCETA ARRIBA: GPIO 14");
             } else if (pDown) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 18");
+                arduboy.setCursor(4, 53); arduboy.print("CRUCETA ABAJO: GPIO 18");
             } else if (pRight) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 19");
+                arduboy.setCursor(4, 53); arduboy.print("CRUCETA DERECHA: GPIO 19");
             } else if (pLeft) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 05");
-            } else if (pOk) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 20");
+                arduboy.setCursor(4, 53); arduboy.print("CRUCETA IZQ: GPIO 05");
             } else if (pBoot) {
-                arduboy.setCursor(4, 54); arduboy.print("PIN ACTIVADO: GPIO 09");
+                arduboy.setCursor(4, 53); arduboy.print("BOTON BOOT: GPIO 09");
             } else {
-                arduboy.setCursor(6, 54); arduboy.print("Pulsa pin | BOOT:Menu");
+                arduboy.setCursor(6, 53); arduboy.print("Pulsa pin | BOOT:Menu");
+            }
+            break;
+        }
+
+        case STATE_SETTINGS: {
+            drawSettingsScreen();
+
+            // Regreso con animación de deslizamiento hacia el Menú al pulsar RIGHT
+            if (arduboy.justPressed(RIGHT_BUTTON)) {
+                transitionSettingsToMenu();
+                break;
+            }
+
+            // Navegación Vertical entre opciones con UP y DOWN
+            if (arduboy.justPressed(UP_BUTTON)) {
+                sound.tone(880, 15);
+                settingsCursor--;
+                if (settingsCursor < 0) settingsCursor = 3;
+            }
+            if (arduboy.justPressed(DOWN_BUTTON)) {
+                sound.tone(700, 15);
+                settingsCursor++;
+                if (settingsCursor > 3) settingsCursor = 0;
+            }
+
+            // DISMINUIR con Botón B (GPIO 4) o cruceta LEFT
+            if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+                if (settingsCursor == 0) {
+                    if (sysBrightness > 10) {
+                        applyBrightness(sysBrightness - 10);
+                        sound.tone(1000, 20);
+                    } else {
+                        sound.tone(600, 15);
+                    }
+                } else if (settingsCursor == 1) {
+                    if (sysVolume > 0) {
+                        sound.setVolume(sysVolume - 1);
+                        sysVolume = sound.getVolume();
+                        sound.tone(1000, 30);
+                    } else {
+                        sound.tone(600, 15);
+                    }
+                } else if (settingsCursor == 2) {
+                    sound.tone(900, 20);
+                }
+            }
+
+            // AUMENTAR / SELECCIONAR con Botón A (GPIO 3)
+            if (arduboy.justPressed(A_BUTTON)) {
+                if (settingsCursor == 0) {
+                    if (sysBrightness < 100) {
+                        applyBrightness(sysBrightness + 10);
+                        sound.tone(1400, 20);
+                    } else {
+                        sound.tone(700, 15);
+                    }
+                } else if (settingsCursor == 1) {
+                    if (sysVolume < 3) {
+                        sound.setVolume(sysVolume + 1);
+                        sysVolume = sound.getVolume();
+                        sound.tone(1200, 30);
+                    } else {
+                        sound.tone(700, 15);
+                    }
+                } else if (settingsCursor == 2) {
+                    sound.tone(900, 20);
+                } else if (settingsCursor == 3) {
+                    transitionSettingsToMenu();
+                    break;
+                }
             }
             break;
         }
     }
 
     // Pause Overlay Window
-    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && gamePaused) {
-        arduboy.fillRect(12, 16, 104, 32, BLACK);
-        arduboy.drawRect(12, 16, 104, 32, WHITE);
-        arduboy.drawRect(14, 18, 100, 28, WHITE);
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS && gamePaused) {
+        arduboy.fillRect(20, 16, 88, 32, BLACK);
+        arduboy.drawRect(20, 16, 88, 32, WHITE);
+        arduboy.drawRect(22, 18, 84, 28, WHITE);
         arduboy.setCursor(49, 22);
         arduboy.print("PAUSA");
         arduboy.setCursor(22, 33);
-        arduboy.print("BOOT: REANUDAR");
+        arduboy.print("CLICK: REANUDAR");
     }
 
     arduboy.display();

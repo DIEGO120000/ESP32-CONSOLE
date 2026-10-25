@@ -42,7 +42,15 @@ public:
     }
 
     void initRandomSeed() {
+        #if defined(ESP32)
+        randomSeed(analogRead(1) ^ millis() ^ esp_random());
+        #else
         randomSeed(analogRead(0) ^ millis());
+        #endif
+    }
+
+    void setContrast(uint8_t contrast) {
+        Arduboy2Core::setContrast(contrast);
     }
 
     void delayShort(uint16_t ms) {

@@ -17,15 +17,19 @@
 #define ARDUBOY_PIN_SCL        6    // OLED SCL -> GPIO 6
 
 // 5-Way Mechanical Digital D-Pad Pins (Active LOW with INPUT_PULLUP)
-#define ARDUBOY_PIN_UP         14   // Dirección UP    -> GPIO 14 (Reasignado)
+#define ARDUBOY_PIN_UP         14   // Dirección UP    -> GPIO 14
 #define ARDUBOY_PIN_DOWN       18   // Dirección DOWN  -> GPIO 18
 #define ARDUBOY_PIN_RIGHT      19   // Dirección RIGHT -> GPIO 19
-#define ARDUBOY_PIN_LEFT       5    // Dirección LEFT  -> GPIO 5 (Reasignado, liberado de USB D+)
-#define ARDUBOY_PIN_SELECT     20   // Pulsación Central (Click / Enter) -> GPIO 20
+#define ARDUBOY_PIN_LEFT       5    // Dirección LEFT  -> GPIO 5 (Cruceta)
+#define ARDUBOY_PIN_SELECT     20   // Click Central de la cruceta (Menú Ajustes) -> GPIO 20
+#define PIN_NAV_CENTER         ARDUBOY_PIN_SELECT
 #define ARDUBOY_PIN_CLICK      ARDUBOY_PIN_SELECT
 
-// Pin del LED que se desea mantener apagado permanentemente (LED de estado en GPIO 15)
-#define LED_PIN_CLAMP_OFF      15
+// NES Style Action Buttons
+#define PIN_BUTTON_A           3    // Botón A Físico (Soldado a GPIO 3) -> Select / OK / Confirmar
+#define PIN_BUTTON_B           4    // Botón B Físico (Soldado a GPIO 4) -> Inactivo / Sin función por ahora
+#define ARDUBOY_PIN_A          PIN_BUTTON_A
+#define ARDUBOY_PIN_B          PIN_BUTTON_B
 
 // Aliases for compatibility
 #define PIN_UP                 ARDUBOY_PIN_UP
@@ -44,8 +48,8 @@
 // BOOT Button (Integrated on-board ESP32-C6)
 #define ARDUBOY_PIN_BOOT       9    // BOOT Button -> GPIO 9 (Active LOW, internal pullup)
 
-// Audio Buzzer Output (Speaker connected to GPIO 2)
-#define ARDUBOY_PIN_BUZZER     2    // Speaker/Buzzer -> GPIO 2
+// Audio Buzzer Output Disabled (No buzzer connected)
+#define ARDUBOY_PIN_BUZZER     -1
 
 #ifndef _BV
 #define _BV(bit) (1 << (bit))
@@ -58,6 +62,9 @@
 #define DOWN_BUTTON            _BV(4) // 0x10
 #define A_BUTTON               _BV(3) // 0x08
 #define B_BUTTON               _BV(2) // 0x04
+#define CLICK_BUTTON           _BV(1) // 0x02 (Click Central de la cruceta - GPIO 20)
+#define SYSTEM_MENU_BUTTON     CLICK_BUTTON
+#define SYS_BUTTON             CLICK_BUTTON
 
 #define WIDTH                  128
 #define HEIGHT                 64
@@ -86,84 +93,55 @@ public:
         boot();
     }
 
+    static uint32_t validPullupMask;
+
+    static void calibrateButtonPins() {
+        const uint8_t candidatePins[] = {
+            ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT,
+            PIN_BUTTON_A, PIN_BUTTON_B, PIN_NAV_CENTER, ARDUBOY_PIN_BOOT
+        };
+        for (uint8_t p : candidatePins) {
+            gpio_reset_pin((gpio_num_t)p);
+            pinMode(p, INPUT_PULLUP);
+        }
+        delay(15);
+        validPullupMask = 0;
+        for (uint8_t p : candidatePins) {
+            if (digitalRead(p) == HIGH) {
+                validPullupMask |= (1UL << p);
+            }
+        }
+    }
+
     static void initPins() {
         #if defined(ESP32)
-        // Desvincular el pad 13 del controlador USB-JTAG por seguridad
-        gpio_reset_pin(GPIO_NUM_13);
-        PIN_FUNC_SELECT(IO_MUX_GPIO13_REG, PIN_FUNC_GPIO);
-
-        #if defined(USB_SERIAL_JTAG_CONF0_REG) && defined(USB_SERIAL_JTAG_USB_PAD_ENABLE)
-        CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+        // Desvincular periféricos PWM previos en pines de botones
+        ledcDetach(2);
+        ledcDetach(3);
+        ledcDetach(4);
         #endif
 
-        // Configurar GPIO 13 desvinculado con pull-up por seguridad
-        gpio_config_t io_conf = {};
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_INPUT;
-        io_conf.pin_bit_mask = (1ULL << GPIO_NUM_13);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-        gpio_config(&io_conf);
+        const uint8_t primaryPins[] = {
+            PIN_BUTTON_A, PIN_BUTTON_B,
+            ARDUBOY_PIN_UP, ARDUBOY_PIN_DOWN, ARDUBOY_PIN_RIGHT, ARDUBOY_PIN_LEFT,
+            PIN_NAV_CENTER, ARDUBOY_PIN_BOOT
+        };
+        for (uint8_t p : primaryPins) {
+            gpio_reset_pin((gpio_num_t)p);
+            pinMode(p, INPUT_PULLUP);
+        }
 
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_DOWN);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_RIGHT);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_SELECT);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BOOT);
-
-        // Desactivar y apagar permanentemente el LED en GPIO 25
-        gpio_reset_pin((gpio_num_t)LED_PIN_CLAMP_OFF);
-        gpio_set_direction((gpio_num_t)LED_PIN_CLAMP_OFF, GPIO_MODE_OUTPUT);
-        gpio_set_level((gpio_num_t)LED_PIN_CLAMP_OFF, 0);
-        #endif
-
-        pinMode(13, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_DOWN, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_RIGHT, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_SELECT, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_BOOT, INPUT_PULLUP);
-
-        // Apagar LED en GPIO 25
-        pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
-        digitalWrite(LED_PIN_CLAMP_OFF, LOW);
+        calibrateButtonPins();
     }
 
     static void boot() {
-        // 1. Explicit unbinding & isolation of GPIO 13 and all D-Pad pins + BOOT
+        // 1. Explicit unbinding & isolation of GPIO 13, GPIO 2, GPIO 3 and all buttons + BOOT
         initPins();
 
-        // 2. Initialize Audio Buzzer on GPIO 2 (Full isolation & pulldown clamp)
-        #if defined(ESP32)
-        ledcDetach(ARDUBOY_PIN_BUZZER);
-        esp_rom_gpio_pad_select_gpio((uint32_t)ARDUBOY_PIN_BUZZER);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BUZZER);
-        gpio_set_direction((gpio_num_t)ARDUBOY_PIN_BUZZER, GPIO_MODE_OUTPUT);
-        gpio_pullup_dis((gpio_num_t)ARDUBOY_PIN_BUZZER);
-        gpio_pulldown_en((gpio_num_t)ARDUBOY_PIN_BUZZER);
-        gpio_set_level((gpio_num_t)ARDUBOY_PIN_BUZZER, 0);
-        #else
-        pinMode(ARDUBOY_PIN_BUZZER, OUTPUT);
-        digitalWrite(ARDUBOY_PIN_BUZZER, LOW);
-        #endif
-
-        // 3. Initialize I2C bus at 400kHz using EXCLUSIVELY GPIO 7 (SDA) and GPIO 6 (SCL)
+        // 2. Initialize I2C bus at 400kHz using EXCLUSIVELY GPIO 7 (SDA) and GPIO 6 (SCL)
         Wire.begin(7, 6);
         Wire.setClock(400000UL);
         delay(50);
-
-        // Post-I2C pin safety re-assertion for D-Pad
-        #if defined(ESP32)
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_UP);
-        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_LEFT);
-        #endif
-        pinMode(ARDUBOY_PIN_UP, INPUT_PULLUP);
-        pinMode(ARDUBOY_PIN_LEFT, INPUT_PULLUP);
-
-        pinMode(LED_PIN_CLAMP_OFF, OUTPUT);
-        digitalWrite(LED_PIN_CLAMP_OFF, LOW);
 
         // Auto-detect I2C Address (0x3C or 0x3D)
         Wire.beginTransmission(SSD1306_I2C_ADDR);
@@ -187,6 +165,14 @@ public:
         Wire.beginTransmission(i2cAddress);
         Wire.write(0x00);
         Wire.write(c);
+        Wire.endTransmission();
+    }
+
+    static void setContrast(uint8_t contrast) {
+        Wire.beginTransmission(i2cAddress);
+        Wire.write(0x00);
+        Wire.write(0x81); // Set Contrast Control (SSD1306 / SSD1309)
+        Wire.write(contrast);
         Wire.endTransmission();
     }
 
@@ -249,19 +235,28 @@ public:
 
     static uint8_t buttonsState() {
         uint8_t raw = 0;
-        #if defined(ESP32)
-        if (digitalRead(ARDUBOY_PIN_UP) == LOW)     raw |= UP_BUTTON;    // GPIO 14 (UP)
-        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)   raw |= DOWN_BUTTON;  // GPIO 18 (DOWN)
-        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW)  raw |= RIGHT_BUTTON; // GPIO 19 (RIGHT)
-        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)   raw |= LEFT_BUTTON;  // GPIO 5 (LEFT)
-        if (digitalRead(ARDUBOY_PIN_SELECT) == LOW) raw |= A_BUTTON;     // GPIO 20 (A / CLICK)
-        #else
-        if (digitalRead(ARDUBOY_PIN_UP) == LOW)     raw |= UP_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW)   raw |= DOWN_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW)  raw |= RIGHT_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW)   raw |= LEFT_BUTTON;
-        if (digitalRead(ARDUBOY_PIN_SELECT) == LOW) raw |= A_BUTTON;
-        #endif
+
+        // UP: GPIO 14
+        if (digitalRead(ARDUBOY_PIN_UP) == LOW) raw |= UP_BUTTON;
+
+        // DOWN: GPIO 18
+        if (digitalRead(ARDUBOY_PIN_DOWN) == LOW) raw |= DOWN_BUTTON;
+
+        // LEFT: GPIO 5
+        if (digitalRead(ARDUBOY_PIN_LEFT) == LOW) raw |= LEFT_BUTTON;
+
+        // RIGHT: GPIO 19
+        if (digitalRead(ARDUBOY_PIN_RIGHT) == LOW) raw |= RIGHT_BUTTON;
+
+        // ACTION A: Botón A físico (GPIO 3) -> Seleccionar / Confirmar / Acción
+        if (digitalRead(PIN_BUTTON_A) == LOW) raw |= A_BUTTON;
+
+        // ACTION B: Botón B físico (GPIO 4) -> Disminuir en Ajustes / Acción B
+        if (digitalRead(PIN_BUTTON_B) == LOW) raw |= B_BUTTON;
+
+        // CLICK CENTRAL CRUCETA (GPIO 20): Click Central / Pausa en juegos
+        if (digitalRead(PIN_NAV_CENTER) == LOW) raw |= CLICK_BUTTON;
+
         return raw;
     }
 
