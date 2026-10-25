@@ -36,7 +36,7 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     flex-direction: column;
   }
   header {
-    height: 54px;
+    height: 50px;
     background: linear-gradient(180deg, #181b29 0%, #101320 100%);
     border-bottom: 2px solid #262c45;
     display: flex;
@@ -46,17 +46,17 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     flex-shrink: 0;
   }
   .title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 800;
     letter-spacing: 1px;
     color: #8fa0c0;
     text-transform: uppercase;
   }
   .badge {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    padding: 5px 12px;
-    border-radius: 12px;
+    padding: 4px 10px;
+    border-radius: 10px;
     letter-spacing: 0.5px;
     background: #2a2e45;
     color: #a0aec0;
@@ -82,9 +82,9 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 12px;
-    gap: 12px;
-    height: calc(100% - 54px);
+    padding: 10px;
+    gap: 10px;
+    height: calc(100% - 50px);
   }
   .touch-btn {
     flex: 1;
@@ -92,7 +92,7 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-radius: 16px;
+    border-radius: 14px;
     background: #151928;
     border: 3px solid #28304f;
     box-shadow: inset 0 2px 0 rgba(255,255,255,0.06), 0 6px 16px rgba(0,0,0,0.4);
@@ -100,16 +100,16 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     transition: background 0.08s, transform 0.05s, border-color 0.08s, box-shadow 0.08s;
   }
   .touch-btn .arrow {
-    font-size: 48px;
+    font-size: 44px;
     line-height: 1;
     color: #8e9bb8;
     transition: color 0.08s;
   }
   .touch-btn .label {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 800;
     letter-spacing: 2px;
-    margin-top: 6px;
+    margin-top: 4px;
     color: #8e9bb8;
     text-transform: uppercase;
   }
@@ -133,6 +133,46 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .p2-mode .touch-btn.active .label {
     color: #ff8c00;
   }
+  .pause-bar {
+    height: 48px;
+    background: #181d2e;
+    border: 2px solid #2e3859;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+  .pause-bar:active {
+    transform: scale(0.98);
+  }
+  .pause-bar.can-resume {
+    background: rgba(250, 204, 21, 0.2) !important;
+    border-color: #facc15 !important;
+    color: #facc15 !important;
+    box-shadow: 0 0 15px rgba(250, 204, 21, 0.4) !important;
+    animation: pulsePause 1.5s infinite;
+  }
+  @keyframes pulsePause {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.75; }
+  }
+  .pause-bar.locked {
+    background: rgba(239, 68, 68, 0.12) !important;
+    border-color: rgba(239, 68, 68, 0.35) !important;
+    color: #f87171 !important;
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
 </style>
 </head>
 <body id="body">
@@ -145,6 +185,10 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       <div class="arrow">&#9650;</div>
       <div class="label">ARRIBA</div>
     </div>
+    <div id="btnPause" class="pause-bar">
+      <span id="pauseIcon">&#10074;&#10074;</span>
+      <span id="pauseText">PAUSA</span>
+    </div>
     <div id="btnDown" class="touch-btn">
       <div class="arrow">&#9660;</div>
       <div class="label">ABAJO</div>
@@ -154,14 +198,39 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   <script>
     let ws = null;
     let playerRole = "";
+    let currentPauseState = 0; // 0 = playing, 1 = paused by P1, 2 = paused by P2
+
     const badge = document.getElementById("statusBadge");
     const body = document.getElementById("body");
     const btnUp = document.getElementById("btnUp");
     const btnDown = document.getElementById("btnDown");
+    const btnPause = document.getElementById("btnPause");
+    const pauseIcon = document.getElementById("pauseIcon");
+    const pauseText = document.getElementById("pauseText");
 
     function haptic() {
       if (navigator.vibrate) {
         navigator.vibrate(15);
+      }
+    }
+
+    function updatePauseUI() {
+      if (currentPauseState === 0) {
+        btnPause.className = "pause-bar";
+        pauseIcon.innerHTML = "&#10074;&#10074;";
+        pauseText.textContent = "PAUSA";
+      } else {
+        const isMyPause = (currentPauseState === 1 && playerRole === "P1") || 
+                          (currentPauseState === 2 && playerRole === "P2");
+        if (isMyPause) {
+          btnPause.className = "pause-bar can-resume";
+          pauseIcon.innerHTML = "&#9654;";
+          pauseText.textContent = "REANUDAR PARTIDA";
+        } else {
+          btnPause.className = "pause-bar locked";
+          pauseIcon.innerHTML = "&#128274;";
+          pauseText.textContent = "PAUSADO POR JUGADOR " + currentPauseState;
+        }
       }
     }
 
@@ -182,15 +251,25 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
           badge.className = "badge p1";
           body.className = "p1-mode";
           haptic();
+          updatePauseUI();
         } else if (msg === "P2") {
           playerRole = "P2";
           badge.textContent = "JUGADOR 2 (DER)";
           badge.className = "badge p2";
           body.className = "p2-mode";
           haptic();
+          updatePauseUI();
         } else if (msg === "FULL") {
           badge.textContent = "SALA LLENA (ESPECTADOR)";
           badge.className = "badge";
+        } else if (msg.startsWith("PAUSE:")) {
+          currentPauseState = parseInt(msg.split(":")[1]) || 0;
+          updatePauseUI();
+          haptic();
+        } else if (msg === "RESUME") {
+          currentPauseState = 0;
+          updatePauseUI();
+          haptic();
         }
       };
 
@@ -241,11 +320,30 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       element.addEventListener("mouseleave", endPress);
     }
 
-    // Single-byte commands:
+    // Single-byte commands for paddles:
     // 'U' = Up Press, 'u' = Up Release
     // 'D' = Down Press, 'd' = Down Release
     bindTouch(btnUp, "U", "u");
     bindTouch(btnDown, "D", "d");
+
+    // Pause handling:
+    function handlePauseClick(e) {
+      e.preventDefault();
+      if (currentPauseState !== 0) {
+        const isMyPause = (currentPauseState === 1 && playerRole === "P1") || 
+                          (currentPauseState === 2 && playerRole === "P2");
+        if (!isMyPause) {
+          // Locked: only the player who paused can unpause!
+          if (navigator.vibrate) navigator.vibrate([40, 50, 40]);
+          return;
+        }
+      }
+      haptic();
+      sendEvent("P");
+    }
+
+    btnPause.addEventListener("touchstart", handlePauseClick, {passive: false});
+    btnPause.addEventListener("click", handlePauseClick);
 
     window.addEventListener("load", connectWS);
   </script>
@@ -275,6 +373,9 @@ public:
     volatile bool p1Down = false;
     volatile bool p2Up = false;
     volatile bool p2Down = false;
+
+    // Pause state: 0 = running, 1 = paused by P1, 2 = paused by P2
+    volatile uint8_t pausedBy = 0;
 
     // Connection tracking
     bool p1Connected = false;
@@ -324,6 +425,7 @@ public:
         p1Down = false;
         p2Up = false;
         p2Down = false;
+        pausedBy = 0;
         p1Connected = false;
         p2Connected = false;
 
@@ -358,6 +460,7 @@ public:
         p1Down = false;
         p2Up = false;
         p2Down = false;
+        pausedBy = 0;
         p1Connected = false;
         p2Connected = false;
 
@@ -376,23 +479,23 @@ public:
         // Accept new WebSocket TCP clients
         WiFiClient newClient = wsServer.accept();
         if (newClient) {
-                int freeSlot = -1;
-                for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
-                    if (!clients[i].active || !clients[i].client.connected()) {
-                        freeSlot = i;
-                        break;
-                    }
-                }
-                if (freeSlot >= 0) {
-                    clients[freeSlot].client = newClient;
-                    clients[freeSlot].client.setNoDelay(true);
-                    clients[freeSlot].active = true;
-                    clients[freeSlot].isHandshakeDone = false;
-                    clients[freeSlot].playerSlot = 0;
-                } else {
-                    newClient.stop();
+            int freeSlot = -1;
+            for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
+                if (!clients[i].active || !clients[i].client.connected()) {
+                    freeSlot = i;
+                    break;
                 }
             }
+            if (freeSlot >= 0) {
+                clients[freeSlot].client = newClient;
+                clients[freeSlot].client.setNoDelay(true);
+                clients[freeSlot].active = true;
+                clients[freeSlot].isHandshakeDone = false;
+                clients[freeSlot].playerSlot = 0;
+            } else {
+                newClient.stop();
+            }
+        }
 
         // Process active WebSocket clients
         p1Connected = false;
@@ -419,8 +522,20 @@ public:
         }
     }
 
+    void broadcastWsText(const String &msg) {
+        for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i].active && clients[i].isHandshakeDone && clients[i].client.connected()) {
+                sendWsText(i, msg);
+            }
+        }
+    }
+
 private:
     void disconnectClient(uint8_t idx) {
+        if (pausedBy == clients[idx].playerSlot) {
+            pausedBy = 0;
+            broadcastWsText("RESUME");
+        }
         if (clients[idx].playerSlot == 1) {
             p1Up = false;
             p1Down = false;
@@ -487,6 +602,13 @@ private:
                 clients[idx].playerSlot = 0; // Spectator
                 sendWsText(idx, "FULL");
             }
+
+            // Sync current pause state to newly connected client
+            if (pausedBy == 1) {
+                sendWsText(idx, "PAUSE:1");
+            } else if (pausedBy == 2) {
+                sendWsText(idx, "PAUSE:2");
+            }
         }
     }
 
@@ -520,7 +642,7 @@ private:
                 for (int m = 0; m < 4; m++) mask[m] = client.read();
             }
 
-            // Read payload bytes (typically 1 byte for our gamepad)
+            // Read payload bytes
             for (uint64_t p = 0; p < payloadLen; p++) {
                 if (!client.available()) break;
                 uint8_t dataByte = client.read();
@@ -536,6 +658,23 @@ private:
     }
 
     void dispatchPlayerInput(uint8_t slot, char cmd) {
+        // Pause Toggle Command ('P')
+        if (cmd == 'P') {
+            if (pausedBy == 0) {
+                // Anyone can pause if currently unpaused
+                pausedBy = slot;
+                broadcastWsText(slot == 1 ? "PAUSE:1" : "PAUSE:2");
+            } else if (pausedBy == slot) {
+                // ONLY the player who initiated pause can unpause
+                pausedBy = 0;
+                broadcastWsText("RESUME");
+            }
+            return;
+        }
+
+        // If game is paused, ignore paddle movement inputs
+        if (pausedBy != 0) return;
+
         if (slot == 1) {
             if (cmd == 'U') p1Up = true;
             else if (cmd == 'u') p1Up = false;

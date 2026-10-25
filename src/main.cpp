@@ -782,6 +782,11 @@ struct PingPongGame {
             return;
         }
 
+        // Si la partida está pausada por alguno de los mandos web, congelar la física
+        if (wifiGamepads.pausedBy != 0) {
+            return;
+        }
+
         // Fin de partida (victoria P1 o P2)
         if (gameOver) {
             if (arduboy.justPressed(A_BUTTON) || wifiGamepads.p1Up || wifiGamepads.p1Down || wifiGamepads.p2Up || wifiGamepads.p2Down) {
@@ -959,6 +964,20 @@ struct PingPongGame {
             else arduboy.print("!GANA JUGADOR 2!");
             arduboy.setCursor(20, 33);
             arduboy.print("A:Revancha B:Menu");
+        } else if (wifiGamepads.pausedBy != 0) {
+            // Cartel de Pausa en pantalla OLED SSD1309 2.42"
+            arduboy.fillRect(10, 14, 108, 36, BLACK);
+            arduboy.drawRect(10, 14, 108, 36, WHITE);
+            arduboy.drawRect(12, 16, 104, 32, WHITE);
+            arduboy.setCursor(49, 19);
+            arduboy.print("PAUSA");
+            arduboy.setCursor(22, 29);
+            if (wifiGamepads.pausedBy == 1) arduboy.print("PAUSADO POR P1");
+            else arduboy.print("PAUSADO POR P2");
+            arduboy.setCursor(16, 38);
+            arduboy.print("Solo P");
+            arduboy.print(wifiGamepads.pausedBy);
+            arduboy.print(" despausa");
         }
     }
 
