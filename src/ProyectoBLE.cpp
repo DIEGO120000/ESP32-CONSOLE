@@ -1,9 +1,11 @@
 #include "ProyectoBLE.h"
 #include <sdkconfig.h>
 #include <Arduino.h>
+#if defined(CONFIG_BLUEDROID_ENABLED)
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
+#endif
 #include <Preferences.h>
 #include <esp_arduino_version.h>
 #include "Arduboy2.h"
@@ -15,6 +17,7 @@ extern Arduboy2 arduboy;
 namespace ProyectoBLEModule {
 
 // Bluetooth maximum transmit power
+#if defined(CONFIG_BLUEDROID_ENABLED)
 #if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C2) || defined(CONFIG_IDF_TARGET_ESP32S3)
 #define BLE_MAX_TX_POWER ESP_PWR_LVL_P21  // ESP32C3 ESP32C2 ESP32S3
 #elif defined(CONFIG_IDF_TARGET_ESP32H2) || defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -24,6 +27,8 @@ namespace ProyectoBLEModule {
 #endif
 
 static BLEAdvertising *pAdvertising = nullptr;
+static esp_bd_addr_t current_mac = {0xFE, 0xED, 0xC0, 0xFF, 0xEE, 0x69};
+#endif
 static int currentMode = 0;
 static Preferences preferences;
 
@@ -32,7 +37,6 @@ static unsigned long lastChangeTime = 0;
 static const unsigned long ADVERTISE_DURATION = 400; // 400 ms active transmission (optimized)
 static const unsigned long SILENCE_DURATION = 150;   // 150 ms silence (optimized)
 static bool isAdvertisingActive = false;
-static esp_bd_addr_t current_mac = {0xFE, 0xED, 0xC0, 0xFF, 0xEE, 0x69};
 static bool forceUpdate = true;
 static int lastMode = -1;
 static const char* lastBroadcastName = "Iniciando...";
@@ -59,6 +63,7 @@ static void nextMode(){
   preferences.end();
 }
 
+#if defined(CONFIG_BLUEDROID_ENABLED)
 static void setAdvertisementData(BLEAdvertisementData &oAdvertisementData, const AppleDevice& dev) {
   uint8_t packet[31];
   size_t packetLen;
@@ -80,6 +85,7 @@ static void setRandomDeviceData(BLEAdvertisementData &oAdvertisementData) {
   AppleDevice dev = ALL_DEVICES[idx];
   setAdvertisementData(oAdvertisementData, dev);
 }
+#endif
 
 } // namespace ProyectoBLEModule
 
@@ -100,6 +106,7 @@ void ProyectoBLEClass::init() {
   // Ensure RGB LED is completely OFF
   rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
+#if defined(CONFIG_BLUEDROID_ENABLED)
   BLEDevice::init("AirPods 69");
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, BLE_MAX_TX_POWER);
 
@@ -113,6 +120,9 @@ void ProyectoBLEClass::init() {
   #else
   pAdvertising->setDeviceAddress(null_addr, BLE_ADDR_TYPE_RANDOM);
   #endif
+#else
+  lastBroadcastName = "Inactivo (ESP32-C6)";
+#endif
 
   lastChangeTime = 0;
   forceUpdate = true;
@@ -123,7 +133,7 @@ void ProyectoBLEClass::init() {
 
 void ProyectoBLEClass::update() {
   using namespace ProyectoBLEModule;
-  if (!running || !pAdvertising) return;
+  if (!running) return;
 
   bool modeChanged = false;
 
@@ -163,6 +173,9 @@ void ProyectoBLEClass::update() {
 
   unsigned long now = millis();
   unsigned long elapsed = now - lastChangeTime;
+
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  if (!pAdvertising) return;
 
   if (elapsed >= (ADVERTISE_DURATION + SILENCE_DURATION) || modeChanged || forceUpdate || currentMode != lastMode) {
     lastChangeTime = now;
@@ -249,7 +262,7 @@ void ProyectoBLEClass::update() {
     pAdvertising->setMinInterval(0x20);
     pAdvertising->setMaxInterval(0x20);
     pAdvertising->setMinPreferred(0x20);
-    pAdvertising->setMaxPreferred(0x20);
+    pAdvertising->setPreferred(0x20);
 
     int rand_val = random(100);
     if (rand_val < 70) {
@@ -269,6 +282,10 @@ void ProyectoBLEClass::update() {
     pAdvertising->stop();
     isAdvertisingActive = false;
   }
+#else
+  (void)elapsed;
+  (void)modeChanged;
+#endif
 }
 
 void ProyectoBLEClass::draw() {
@@ -314,11 +331,13 @@ void ProyectoBLEClass::draw() {
 
 void ProyectoBLEClass::stop() {
   using namespace ProyectoBLEModule;
+#if defined(CONFIG_BLUEDROID_ENABLED)
   if (pAdvertising) {
     pAdvertising->stop();
   }
   BLEDevice::deinit(false);
   pAdvertising = nullptr;
+#endif
   rgbLedWrite(8, 0, 0, 0);
   running = false;
 }

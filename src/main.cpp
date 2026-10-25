@@ -11,6 +11,7 @@
 #include "braindu_bitmaps.h"
 #include "hangman_words.h"
 #include "MathChallenge.h"
+#include "WiFiGamepadServer.h"
 
 // =============================================================================
 // SYSTEM AUDIO & VOLUME MANAGEMENT (GPIO 2 - BUZZER)
@@ -298,7 +299,8 @@ void draw5x8Sprite(int16_t x, int16_t y, const uint8_t sprite[8], uint8_t color 
 enum PingPongMode {
     PP_MODE_SUBMENU = 0,
     PP_MODE_NORMAL,
-    PP_MODE_DODGE
+    PP_MODE_DODGE,
+    PP_MODE_WIFI_2P
 };
 
 struct PingPongGame {
@@ -326,8 +328,15 @@ struct PingPongGame {
     unsigned long submenuEnterTime;
     bool exitRequested;
 
+    // 2P WiFi Gamepads Variables
+    bool wifiMatchStarted;
+    uint8_t winnerP;
+
     void init() {
         melodyPlayer.stop();
+        if (wifiGamepads.isRunning) {
+            wifiGamepads.stop();
+        }
         mode = PP_MODE_SUBMENU;
         submenuCursor = 0;
         submenuEnterTime = millis();
@@ -405,16 +414,18 @@ struct PingPongGame {
     }
 
     void updateSubmenu() {
-        // Navegación bidireccional accesible:
-        // UP / LEFT -> Modo Normal (0)
+        // Navegación bidireccional accesible (3 modos):
         if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
-            sound.tone(880, 15);
-            submenuCursor = 0;
+            if (submenuCursor > 0) {
+                sound.tone(880, 15);
+                submenuCursor--;
+            }
         }
-        // DOWN / RIGHT -> Modo Invertido (1)
         if (arduboy.justPressed(DOWN_BUTTON) || arduboy.justPressed(RIGHT_BUTTON)) {
-            sound.tone(700, 15);
-            submenuCursor = 1;
+            if (submenuCursor < 2) {
+                sound.tone(700, 15);
+                submenuCursor++;
+            }
         }
 
         // Botón B: Regresar al Menú Principal
@@ -429,8 +440,10 @@ struct PingPongGame {
             sound.tone(1760, 40);
             if (submenuCursor == 0) {
                 initNormal();
-            } else {
+            } else if (submenuCursor == 1) {
                 initDodge();
+            } else {
+                initWifi2P();
             }
         }
     }
@@ -443,22 +456,23 @@ struct PingPongGame {
         arduboy.print("PING PONG");
         arduboy.setTextColor(WHITE);
 
-        const char* ppItems[2] = {
+        const char* ppItems[3] = {
             "1. Modo Normal",
-            "2. Modo Invertido"
+            "2. Modo Invertido",
+            "3. 2P WiFi Gamepads"
         };
 
-        for (uint8_t i = 0; i < 2; i++) {
-            int16_t y = 20 + (i * 14);
+        for (uint8_t i = 0; i < 3; i++) {
+            int16_t y = 16 + (i * 12);
             if (i == submenuCursor) {
-                arduboy.fillRect(8, y - 2, 112, 11, WHITE);
+                arduboy.fillRect(4, y - 2, 120, 11, WHITE);
                 arduboy.setTextColor(BLACK);
-                arduboy.setCursor(12, y);
+                arduboy.setCursor(8, y);
                 arduboy.print("> ");
                 arduboy.print(ppItems[i]);
                 arduboy.setTextColor(WHITE);
             } else {
-                arduboy.setCursor(12, y);
+                arduboy.setCursor(8, y);
                 arduboy.print("  ");
                 arduboy.print(ppItems[i]);
             }
@@ -732,6 +746,222 @@ struct PingPongGame {
         }
     }
 
+    void initWifi2P() {
+        mode = PP_MODE_WIFI_2P;
+        melodyPlayer.stop();
+        wifiGamepads.begin();
+        p1Y = 24.0f;
+        p2Y = 24.0f;
+        s1 = 0;
+        s2 = 0;
+        gameOver = false;
+        victory = false;
+        winnerP = 0;
+        wifiMatchStarted = false;
+        serveNormal(1);
+    }
+
+    void updateWifi2P() {
+        wifiGamepads.update();
+
+        // Botón B: Regresar al menú de Ping Pong y apagar SoftAP
+        if (arduboy.justPressed(B_BUTTON)) {
+            sound.tone(1400, 30);
+            init();
+            return;
+        }
+
+        // Pantalla de Lobby previo al saque
+        if (!wifiMatchStarted) {
+            // El host puede pulsar A para arrancar la partida
+            if (arduboy.justPressed(A_BUTTON)) {
+                sound.tone(1760, 40);
+                wifiMatchStarted = true;
+                serveNormal(1);
+            }
+            return;
+        }
+
+        // Fin de partida (victoria P1 o P2)
+        if (gameOver) {
+            if (arduboy.justPressed(A_BUTTON) || wifiGamepads.p1Up || wifiGamepads.p1Down || wifiGamepads.p2Up || wifiGamepads.p2Down) {
+                sound.tone(1760, 40);
+                s1 = 0;
+                s2 = 0;
+                gameOver = false;
+                winnerP = 0;
+                serveNormal(1);
+            }
+            return;
+        }
+
+        // --- Movimiento Paleta 1 (Izquierda) ---
+        // Controlable por Mando Web A (WebSocket) O Cruceta Física local
+        if ((wifiGamepads.p1Up || arduboy.pressed(UP_BUTTON)) && p1Y > 11.0f) p1Y -= 2.6f;
+        if ((wifiGamepads.p1Down || arduboy.pressed(DOWN_BUTTON)) && p1Y < 46.0f) p1Y += 2.6f;
+
+        // --- Movimiento Paleta 2 (Derecha) ---
+        // Controlable exclusivamente por Mando Web B (WebSocket)
+        if (wifiGamepads.p2Up && p2Y > 11.0f) p2Y -= 2.6f;
+        if (wifiGamepads.p2Down && p2Y < 46.0f) p2Y += 2.6f;
+
+        // Movimiento de la pelota
+        bx += bvx;
+        by += bvy;
+
+        // Rebotes en paredes superior e inferior
+        if (by <= 10.0f) {
+            by = 10.0f;
+            bvy = fabs(bvy);
+            sound.tone(450, 12);
+        } else if (by >= 60.0f) {
+            by = 60.0f;
+            bvy = -fabs(bvy);
+            sound.tone(450, 12);
+        }
+
+        // Colisión segmentada Paleta 1 (Izquierda)
+        if (bx <= 6.0f && bx >= 2.0f && by + 3.0f >= p1Y && by <= p1Y + 16.0f && bvx < 0.0f) {
+            bx = 7.0f;
+            rallyCount++;
+            ballSpeed = min(4.6f, ballSpeed * 1.05f);
+
+            float relY = (by + 1.5f) - (p1Y + 8.0f);
+            if (relY <= -4.8f) {
+                bvx = ballSpeed * 0.50f;
+                bvy = -ballSpeed * 0.866f;
+            } else if (relY <= -1.6f) {
+                bvx = ballSpeed * 0.866f;
+                bvy = -ballSpeed * 0.50f;
+            } else if (relY <= 1.6f) {
+                bvx = ballSpeed * 0.98f;
+                bvy = relY * 0.12f;
+            } else if (relY <= 4.8f) {
+                bvx = ballSpeed * 0.866f;
+                bvy = ballSpeed * 0.50f;
+            } else {
+                bvx = ballSpeed * 0.50f;
+                bvy = ballSpeed * 0.866f;
+            }
+            sound.tone(800 + min(600, rallyCount * 40), 18);
+        }
+
+        // Colisión segmentada Paleta 2 (Derecha)
+        if (bx >= 119.0f && bx <= 123.0f && by + 3.0f >= p2Y && by <= p2Y + 16.0f && bvx > 0.0f) {
+            bx = 118.0f;
+            rallyCount++;
+            ballSpeed = min(4.6f, ballSpeed * 1.05f);
+
+            float relY = (by + 1.5f) - (p2Y + 8.0f);
+            if (relY <= -4.8f) {
+                bvx = -ballSpeed * 0.50f;
+                bvy = -ballSpeed * 0.866f;
+            } else if (relY <= -1.6f) {
+                bvx = -ballSpeed * 0.866f;
+                bvy = -ballSpeed * 0.50f;
+            } else if (relY <= 1.6f) {
+                bvx = -ballSpeed * 0.98f;
+                bvy = relY * 0.12f;
+            } else if (relY <= 4.8f) {
+                bvx = -ballSpeed * 0.866f;
+                bvy = ballSpeed * 0.50f;
+            } else {
+                bvx = -ballSpeed * 0.50f;
+                bvy = ballSpeed * 0.866f;
+            }
+            sound.tone(700 + min(600, rallyCount * 40), 18);
+        }
+
+        // Comprobación de puntos (Partida a 5 tantos)
+        if (bx < -4.0f) {
+            s2++;
+            if (s2 >= 5) {
+                gameOver = true;
+                winnerP = 2;
+                triggerRgbLed(255, 140, 0, 1500); // Feedback Naranja Neón P2
+                melodyPlayer.play(pingPongVictoryNotes, 4);
+            } else {
+                sound.tone(220, 80);
+                serveNormal(1);
+            }
+        } else if (bx > 132.0f) {
+            s1++;
+            if (s1 >= 5) {
+                gameOver = true;
+                winnerP = 1;
+                triggerRgbLed(0, 240, 255, 1500); // Feedback Cian Neón P1
+                melodyPlayer.play(pingPongVictoryNotes, 4);
+            } else {
+                sound.tone(1400, 80);
+                serveNormal(-1);
+            }
+        }
+    }
+
+    void drawWifi2P() {
+        if (!wifiMatchStarted) {
+            // Lobby de Conexión y Estado de Mandos
+            arduboy.fillRect(0, 0, 128, 9, WHITE);
+            arduboy.setTextColor(BLACK);
+            arduboy.setCursor(16, 1);
+            arduboy.print("2P WIFI GAMEPADS");
+            arduboy.setTextColor(WHITE);
+
+            arduboy.setCursor(2, 13);
+            arduboy.print("WiFi: RetroArcade-ESP32");
+            arduboy.setCursor(2, 23);
+            arduboy.print("Web:  192.168.4.1");
+
+            arduboy.drawFastHLine(2, 33, 124, WHITE);
+
+            arduboy.setCursor(4, 36);
+            arduboy.print("P1 (Izq): ");
+            if (wifiGamepads.p1Connected) arduboy.print("[CONECTADO]");
+            else arduboy.print("[ESPERANDO]");
+
+            arduboy.setCursor(4, 46);
+            arduboy.print("P2 (Der): ");
+            if (wifiGamepads.p2Connected) arduboy.print("[CONECTADO]");
+            else arduboy.print("[ESPERANDO]");
+
+            arduboy.drawFastHLine(0, 55, 128, WHITE);
+            arduboy.setCursor(6, 57);
+            arduboy.print("A:Iniciar    B:Salir");
+            return;
+        }
+
+        // Marcador superior en pantalla OLED de 2.42"
+        arduboy.setCursor(14, 1); arduboy.print("P1: "); arduboy.print(s1);
+        if (wifiGamepads.p1Connected) arduboy.print("*");
+        arduboy.setCursor(80, 1); arduboy.print("P2: "); arduboy.print(s2);
+        if (wifiGamepads.p2Connected) arduboy.print("*");
+        arduboy.drawFastHLine(0, 9, 128, WHITE);
+
+        // Red central
+        for (uint8_t y = 11; y < 64; y += 6) arduboy.drawFastVLine(63, y, 3, WHITE);
+
+        // Paleta Jugador 1 (Izquierda)
+        arduboy.fillRect(3, (int16_t)p1Y, 3, 16, WHITE);
+
+        // Paleta Jugador 2 (Derecha)
+        arduboy.fillRect(122, (int16_t)p2Y, 3, 16, WHITE);
+
+        // Pelota
+        arduboy.fillRect((int16_t)bx, (int16_t)by, 3, 3, WHITE);
+
+        // Banner de Victoria
+        if (gameOver) {
+            arduboy.fillRect(14, 16, 100, 32, BLACK);
+            arduboy.drawRect(14, 16, 100, 32, WHITE);
+            arduboy.drawRect(16, 18, 96, 28, WHITE);
+            arduboy.setCursor(18, 22);
+            if (winnerP == 1) arduboy.print("!GANA JUGADOR 1!");
+            else arduboy.print("!GANA JUGADOR 2!");
+            arduboy.setCursor(20, 33);
+            arduboy.print("A:Revancha B:Menu");
+        }
+    }
+
     void update() {
         yield();
         switch (mode) {
@@ -743,6 +973,9 @@ struct PingPongGame {
                 break;
             case PP_MODE_DODGE:
                 updateDodge();
+                break;
+            case PP_MODE_WIFI_2P:
+                updateWifi2P();
                 break;
         }
         yield();
@@ -758,6 +991,9 @@ struct PingPongGame {
                 break;
             case PP_MODE_DODGE:
                 drawDodge();
+                break;
+            case PP_MODE_WIFI_2P:
+                drawWifi2P();
                 break;
         }
     }
@@ -6904,6 +7140,7 @@ void loop() {
         case STATE_PING_PONG:
             if (pingPong.exitRequested) {
                 pingPong.exitRequested = false;
+                if (wifiGamepads.isRunning) wifiGamepads.stop();
                 currentState = STATE_MENU;
                 break;
             }
