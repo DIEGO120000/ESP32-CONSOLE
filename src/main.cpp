@@ -620,15 +620,23 @@ struct PingPongGame {
         arduboy.fillRect((int16_t)bx, (int16_t)by, 3, 3, WHITE);
 
         if (gameOver) {
-            arduboy.fillRect(18, 18, 92, 28, BLACK);
-            arduboy.drawRect(18, 18, 92, 28, WHITE);
-            arduboy.setCursor(38, 23); arduboy.print("CPU WINS!");
-            arduboy.setCursor(24, 34); arduboy.print("Press Any Key");
+            const int16_t w = 96;
+            const int16_t h = 30;
+            const int16_t x = (128 - w) / 2;
+            const int16_t y = 17;
+            arduboy.fillRect(x, y, w, h, BLACK);
+            arduboy.drawRoundRect(x, y, w, h, 3, WHITE);
+            arduboy.setCursor((128 - (9 * 6)) / 2, y + 5); arduboy.print("CPU WINS!");
+            arduboy.setCursor((128 - (14 * 6)) / 2, y + 16); arduboy.print("Pulsa un boton");
         } else if (victory) {
-            arduboy.fillRect(18, 18, 92, 28, BLACK);
-            arduboy.drawRect(18, 18, 92, 28, WHITE);
-            arduboy.setCursor(40, 23); arduboy.print("YOU WIN!");
-            arduboy.setCursor(24, 34); arduboy.print("Press Any Key");
+            const int16_t w = 96;
+            const int16_t h = 30;
+            const int16_t x = (128 - w) / 2;
+            const int16_t y = 17;
+            arduboy.fillRect(x, y, w, h, BLACK);
+            arduboy.drawRoundRect(x, y, w, h, 3, WHITE);
+            arduboy.setCursor((128 - (8 * 6)) / 2, y + 5); arduboy.print("YOU WIN!");
+            arduboy.setCursor((128 - (14 * 6)) / 2, y + 16); arduboy.print("Pulsa un boton");
         }
     }
 
@@ -725,23 +733,26 @@ struct PingPongGame {
         }
 
         if (dodgeGameOver) {
-            arduboy.fillRect(14, 14, 100, 36, BLACK);
-            arduboy.drawRect(14, 14, 100, 36, WHITE);
-            arduboy.drawRect(16, 16, 96, 32, WHITE);
+            const int16_t w = 104;
+            const int16_t h = 36;
+            const int16_t x = (128 - w) / 2;
+            const int16_t y = 14;
+            arduboy.fillRect(x, y, w, h, BLACK);
+            arduboy.drawRoundRect(x, y, w, h, 3, WHITE);
 
             if (isNewRecord) {
-                arduboy.setCursor(20, 19);
+                arduboy.setCursor((128 - (13 * 6)) / 2, y + 4);
                 arduboy.print("NUEVO RECORD!");
             } else {
-                arduboy.setCursor(34, 19);
+                arduboy.setCursor((128 - (9 * 6)) / 2, y + 4);
                 arduboy.print("GAME OVER");
             }
 
-            arduboy.setCursor(24, 29);
+            arduboy.setCursor(24, y + 14);
             arduboy.print("ESQUIVAS: ");
             arduboy.print(dodgeScore);
 
-            arduboy.setCursor(22, 38);
+            arduboy.setCursor((128 - (14 * 6)) / 2, y + 24);
             arduboy.print("Pulsa un boton");
         }
     }
@@ -905,7 +916,10 @@ struct PingPongGame {
 
     void drawWifi2P() {
         if (!wifiMatchStarted) {
-            // Lobby de Conexión y Estado de Mandos
+            // Eliminacion formal de artefactos visuales y lineas huerfanas
+            arduboy.fillRect(0, 0, 128, 64, BLACK);
+
+            // Lobby de Conexion y Estado de Mandos
             arduboy.fillRect(0, 0, 128, 9, WHITE);
             arduboy.setTextColor(BLACK);
             arduboy.setCursor(16, 1);
@@ -954,27 +968,38 @@ struct PingPongGame {
         // Pelota
         arduboy.fillRect((int16_t)bx, (int16_t)by, 3, 3, WHITE);
 
-        // Banner de Victoria
+        // Banner de Victoria Centrado
         if (gameOver) {
-            arduboy.fillRect(14, 16, 100, 32, BLACK);
-            arduboy.drawRect(14, 16, 100, 32, WHITE);
-            arduboy.drawRect(16, 18, 96, 28, WHITE);
-            arduboy.setCursor(18, 22);
-            if (winnerP == 1) arduboy.print("!GANA JUGADOR 1!");
-            else arduboy.print("!GANA JUGADOR 2!");
-            arduboy.setCursor(20, 33);
+            const int16_t bw = 104;
+            const int16_t bh = 34;
+            const int16_t bxPos = (128 - bw) / 2;
+            const int16_t byPos = 16;
+            arduboy.fillRect(bxPos, byPos, bw, bh, BLACK);
+            arduboy.drawRoundRect(bxPos, byPos, bw, bh, 3, WHITE);
+
+            arduboy.setCursor((128 - (14 * 6)) / 2, byPos + 5);
+            if (winnerP == 1) arduboy.print("GANA JUGADOR 1");
+            else arduboy.print("GANA JUGADOR 2");
+
+            arduboy.setCursor((128 - (17 * 6)) / 2, byPos + 18);
             arduboy.print("A:Revancha B:Menu");
         } else if (wifiGamepads.pausedBy != 0) {
-            // Cartel de Pausa en pantalla OLED SSD1309 2.42"
-            arduboy.fillRect(10, 14, 108, 36, BLACK);
-            arduboy.drawRect(10, 14, 108, 36, WHITE);
-            arduboy.drawRect(12, 16, 104, 32, WHITE);
-            arduboy.setCursor(49, 19);
+            // Cartel de Pausa Web Centrado
+            const int16_t pw = 108;
+            const int16_t ph = 36;
+            const int16_t pxPos = (128 - pw) / 2;
+            const int16_t pyPos = 14;
+            arduboy.fillRect(pxPos, pyPos, pw, ph, BLACK);
+            arduboy.drawRoundRect(pxPos, pyPos, pw, ph, 3, WHITE);
+
+            arduboy.setCursor((128 - (5 * 6)) / 2, pyPos + 4);
             arduboy.print("PAUSA");
-            arduboy.setCursor(22, 29);
+
+            arduboy.setCursor((128 - (14 * 6)) / 2, pyPos + 14);
             if (wifiGamepads.pausedBy == 1) arduboy.print("PAUSADO POR P1");
             else arduboy.print("PAUSADO POR P2");
-            arduboy.setCursor(16, 38);
+
+            arduboy.setCursor((128 - (16 * 6)) / 2, pyPos + 24);
             arduboy.print("Solo P");
             arduboy.print(wifiGamepads.pausedBy);
             arduboy.print(" despausa");
@@ -6621,6 +6646,128 @@ unsigned long exitComboStart = 0;
 const unsigned long INACTIVITY_TIMEOUT_MS = 90000UL; // 90s timeout de inactividad
 unsigned long lastActivityTime = 0;
 
+bool isCurrentGameActive() {
+    switch (currentState) {
+        case STATE_PING_PONG:
+            if (pingPong.mode == PP_MODE_SUBMENU) return false;
+            if (pingPong.mode == PP_MODE_NORMAL) return (!pingPong.gameOver && !pingPong.victory);
+            if (pingPong.mode == PP_MODE_DODGE) return (!pingPong.dodgeGameOver);
+            if (pingPong.mode == PP_MODE_WIFI_2P) return (pingPong.wifiMatchStarted && !pingPong.gameOver);
+            return false;
+
+        case STATE_BREAKOUT:
+            return (!breakout.gameOver && !breakout.victory);
+
+        case STATE_SPACE_INVADERS:
+            return (!spaceInvaders.gameOver && !spaceInvaders.victory);
+
+        case STATE_1943:
+            return (!airCombat.gameOver);
+
+        case STATE_FLAPPY_BIRD:
+            return (!flappy.gameOver);
+
+        case STATE_SNAKE:
+            return (!snake.gameOver);
+
+        case STATE_JUMP_MAN:
+            return (!jumpMan.inGameOverScreen);
+
+        case STATE_PROYECTO_BLE:
+            return true;
+
+        case STATE_2048:
+            return (!game2048.gameOver);
+
+        case STATE_TREX_RUNNER:
+            return (!trexRunner.gameOver);
+
+        case STATE_TIC_TAC_TOE:
+            return (ticTacToe.state == TTT_PLAYING);
+
+        case STATE_BRAINDU_TRAIN:
+            return (brainduTrain.state == BT_STATE_ACTIVITY);
+
+        case STATE_HANGMAN:
+            return (hangmanGame.mode == HANGMAN_MODE_PLAY);
+
+        case STATE_TRIS:
+            return (trisGame.state == TRIS_STATE_PLAYING || trisGame.state == TRIS_STATE_FLASH);
+
+        case STATE_MATH_CHALLENGE:
+            return (mathChallenge.state == MATH_STATE_PLAYING || mathChallenge.state == MATH_STATE_FEEDBACK);
+
+        default:
+            return false;
+    }
+}
+
+bool currentGameHasSubmenu() {
+    switch (currentState) {
+        case STATE_PING_PONG:
+            return true;
+        case STATE_TIC_TAC_TOE:
+            return true;
+        case STATE_BRAINDU_TRAIN:
+            return true;
+        case STATE_HANGMAN:
+            return true;
+        case STATE_TRIS:
+            return true;
+        case STATE_MATH_CHALLENGE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void returnToCurrentGameSubmenu() {
+    melodyPlayer.stop();
+    sound.noTone();
+    sound.tone(880, 30);
+    gamePaused = false;
+    switch (currentState) {
+        case STATE_PING_PONG:
+            pingPong.init();
+            break;
+        case STATE_TIC_TAC_TOE:
+            ticTacToe.init();
+            break;
+        case STATE_BRAINDU_TRAIN:
+            brainduTrain.state = BT_STATE_MENU;
+            break;
+        case STATE_HANGMAN:
+            hangmanGame.init();
+            break;
+        case STATE_TRIS:
+            trisGame.init();
+            break;
+        case STATE_MATH_CHALLENGE:
+            mathChallenge.state = MATH_STATE_MODE_SELECT;
+            break;
+        default:
+            break;
+    }
+}
+
+void exitCurrentGameToMainMenu() {
+    if (currentState == STATE_PING_PONG) {
+        pingPong.init();
+        if (wifiGamepads.isRunning) wifiGamepads.stop();
+    } else if (currentState == STATE_PROYECTO_BLE) {
+        proyectoBLE.stop();
+    } else if (currentState == STATE_2048) {
+        game2048.saveHighScore();
+    } else if (currentState == STATE_MATH_CHALLENGE) {
+        mathChallenge.saveHighScore();
+    }
+    melodyPlayer.stop();
+    sound.noTone();
+    sound.tone(600, 30);
+    gamePaused = false;
+    currentState = STATE_MENU;
+}
+
 void enterDeepSleep(const char* message = "APAGANDO...") {
     if (currentState == STATE_PROYECTO_BLE) {
         proyectoBLE.stop();
@@ -7044,11 +7191,14 @@ void loop() {
                 } else if (currentState == STATE_MATH_CHALLENGE) {
                     mathChallenge.onBootShortPress();
                 } else if (currentState != STATE_MENU && currentState != STATE_SETTINGS) {
-                    gamePaused = !gamePaused;
                     if (gamePaused) {
-                        sound.tone(600, 30);
-                    } else {
+                        gamePaused = false;
                         sound.tone(900, 30);
+                    } else if (isCurrentGameActive()) {
+                        gamePaused = true;
+                        melodyPlayer.stop();
+                        sound.noTone();
+                        sound.tone(600, 30);
                     }
                 }
             } else if (duration >= 1000 && duration < 3000) {
@@ -7085,16 +7235,31 @@ void loop() {
 
     arduboy.clear();
 
-    // Click Central Cruceta (GPIO 20): Toggle Pausa EXCLUSIVAMENTE dentro de juegos
+    // GESTOR GLOBAL DE PAUSA Y SALIDA UNIVERSAL (GPIO 20, B, A)
     if (currentState != STATE_MENU && currentState != STATE_SETTINGS && currentState != STATE_PIN_DIAGNOSTIC) {
-        if (arduboy.justPressed(CLICK_BUTTON)) {
-            gamePaused = !gamePaused;
-            if (gamePaused) {
+        if (gamePaused) {
+            // Mientras esté activo el estado de pausa:
+            // 1. GPIO 20 (Centro): Quita la pausa y reanuda el bucle del juego
+            if (arduboy.justPressed(CLICK_BUTTON)) {
+                gamePaused = false;
+                sound.tone(900, 30);
+            }
+            // 2. Botón B: Termina la partida actual, detiene timers/WiFi y cambia directamente a STATE_MENU
+            else if (arduboy.justPressed(B_BUTTON)) {
+                exitCurrentGameToMainMenu();
+            }
+            // 3. Botón A: Si el juego cuenta con menú de opciones propio, regresa a dicho menú
+            else if (currentGameHasSubmenu() && arduboy.justPressed(A_BUTTON)) {
+                returnToCurrentGameSubmenu();
+            }
+        } else {
+            // Aislamiento de Pausa:
+            // El Click Central (GPIO 20) ÚNICAMENTE responde si el estado actual es de juego activo
+            if (isCurrentGameActive() && arduboy.justPressed(CLICK_BUTTON)) {
+                gamePaused = true;
                 melodyPlayer.stop();
                 sound.noTone();
                 sound.tone(600, 30);
-            } else {
-                sound.tone(900, 30);
             }
         }
     }
@@ -7419,15 +7584,30 @@ void loop() {
         }
     }
 
-    // Pause Overlay Window
+    // Cuadro de Pausa Universal Centrado con drawRoundRect
     if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS && gamePaused) {
-        arduboy.fillRect(20, 16, 88, 32, BLACK);
-        arduboy.drawRect(20, 16, 88, 32, WHITE);
-        arduboy.drawRect(22, 18, 84, 28, WHITE);
-        arduboy.setCursor(49, 22);
-        arduboy.print("PAUSA");
-        arduboy.setCursor(22, 33);
-        arduboy.print("CLICK: REANUDAR");
+        bool hasSub = currentGameHasSubmenu();
+        const int16_t w = 114;
+        const int16_t h = hasSub ? 46 : 36;
+        const int16_t x = (128 - w) / 2;
+        const int16_t y = (64 - h) / 2;
+
+        arduboy.fillRect(x, y, w, h, BLACK);
+        arduboy.drawRoundRect(x, y, w, h, 3, WHITE);
+
+        arduboy.setCursor((128 - (9 * 6)) / 2, y + 4);
+        arduboy.print("[ PAUSA ]");
+
+        arduboy.setCursor((128 - (16 * 6)) / 2, y + 14);
+        arduboy.print("Centro: Reanudar");
+
+        arduboy.setCursor((128 - (15 * 6)) / 2, y + 24);
+        arduboy.print("B: Salir a Menu");
+
+        if (hasSub) {
+            arduboy.setCursor((128 - (13 * 6)) / 2, y + 34);
+            arduboy.print("A: Menu Juego");
+        }
     }
 
     arduboy.display();

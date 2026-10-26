@@ -25,38 +25,43 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     user-select: none;
     touch-action: none;
   }
-  body, html {
-    width: 100%;
+  html, body {
     height: 100%;
+    height: 100dvh;
+    margin: 0;
+    padding: 8px;
+    box-sizing: border-box;
     overflow: hidden;
-    background-color: #0d0f18;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Courier New", monospace;
-    color: #e0e6ed;
     display: flex;
     flex-direction: column;
+    background-color: #0b0f19;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Courier New", monospace;
+    color: #e0e6ed;
   }
   header {
-    height: 50px;
+    height: 38px;
+    min-height: 38px;
     background: linear-gradient(180deg, #181b29 0%, #101320 100%);
-    border-bottom: 2px solid #262c45;
+    border: 1px solid #262c45;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px;
+    padding: 0 12px;
     flex-shrink: 0;
   }
   .title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 1px;
     color: #8fa0c0;
     text-transform: uppercase;
   }
   .badge {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
-    padding: 4px 10px;
-    border-radius: 10px;
+    padding: 3px 8px;
+    border-radius: 8px;
     letter-spacing: 0.5px;
     background: #2a2e45;
     color: #a0aec0;
@@ -80,14 +85,16 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   }
   .pad-container {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 10px;
-    gap: 10px;
-    height: calc(100% - 50px);
+    gap: 8px;
+    padding-top: 8px;
+    width: 100%;
   }
   .touch-btn {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -95,21 +102,21 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     border-radius: 14px;
     background: #151928;
     border: 3px solid #28304f;
-    box-shadow: inset 0 2px 0 rgba(255,255,255,0.06), 0 6px 16px rgba(0,0,0,0.4);
+    box-shadow: inset 0 2px 0 rgba(255,255,255,0.06), 0 4px 12px rgba(0,0,0,0.4);
     cursor: pointer;
     transition: background 0.08s, transform 0.05s, border-color 0.08s, box-shadow 0.08s;
   }
   .touch-btn .arrow {
-    font-size: 44px;
+    font-size: 38px;
     line-height: 1;
     color: #8e9bb8;
     transition: color 0.08s;
   }
   .touch-btn .label {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 800;
     letter-spacing: 2px;
-    margin-top: 4px;
+    margin-top: 2px;
     color: #8e9bb8;
     text-transform: uppercase;
   }
@@ -134,21 +141,23 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     color: #ff8c00;
   }
   .pause-bar {
-    height: 48px;
+    height: 38px;
+    min-height: 38px;
     background: #181d2e;
     border: 2px solid #2e3859;
-    border-radius: 12px;
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    font-size: 14px;
+    gap: 6px;
+    padding: 0 8px;
+    font-size: 13px;
     font-weight: 800;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
     color: #94a3b8;
     text-transform: uppercase;
     cursor: pointer;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.3);
     transition: all 0.15s ease;
     flex-shrink: 0;
   }
