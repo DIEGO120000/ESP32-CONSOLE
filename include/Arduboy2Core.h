@@ -51,6 +51,9 @@
 // Audio Buzzer Output Disabled (No buzzer connected)
 #define ARDUBOY_PIN_BUZZER     -1
 
+// Battery Telemetry ADC Pin (GPIO 2 / ADC1_CH2, 1:2 Divider 100k/100k)
+#define ARDUBOY_PIN_BATTERY    2
+
 #ifndef _BV
 #define _BV(bit) (1 << (bit))
 #endif
@@ -94,6 +97,9 @@ public:
     }
 
     static uint32_t validPullupMask;
+    static float smoothedVoltage;
+    static int smoothedPercentage;
+    static uint32_t lastBatteryUpdateMs;
 
     static void calibrateButtonPins() {
         const uint8_t candidatePins[] = {
@@ -138,7 +144,10 @@ public:
         // 1. Explicit unbinding & isolation of GPIO 13, GPIO 2, GPIO 3 and all buttons + BOOT
         initPins();
 
-        // 2. Initialize I2C bus at 400kHz using EXCLUSIVELY GPIO 7 (SDA) and GPIO 6 (SCL)
+        // 2. Initialize Battery Telemetry ADC (GPIO 1 / ADC1_CH1)
+        initBattery();
+
+        // 3. Initialize I2C bus at 400kHz using EXCLUSIVELY GPIO 7 (SDA) and GPIO 6 (SCL)
         Wire.begin(7, 6);
         Wire.setClock(400000UL);
         delay(50);
@@ -263,4 +272,113 @@ public:
     static void setRGBled(uint8_t red, uint8_t green, uint8_t blue) {}
     static void setRGBled(uint8_t color, uint8_t val) {}
     static void digitalWriteRGB(uint8_t red, uint8_t green, uint8_t blue) {}
+
+    // Battery Telemetry Subsystem (GPIO 2 - ADC1_CH2, 100k/100k Divider)
+    static void updateBatteryTelemetry(bool forceUpdate = false) {
+        uint32_t now = millis();
+        // Frecuencia de muestreo controlada (cada 400ms para evitar parpadeos)
+        if (!forceUpdate && lastBatteryUpdateMs != 0 && (now - lastBatteryUpdateMs < 400)) {
+            return;
+        }
+        lastBatteryUpdateMs = now;
+
+        // Muestreo con rechazo de valores atípicos (32 muestras)
+        const int N = 32;
+        uint32_t samples[N];
+        for (int i = 0; i < N; i++) {
+            uint32_t mv = analogReadMilliVolts(ARDUBOY_PIN_BATTERY);
+            if (mv == 0) {
+                mv = ((uint32_t)analogRead(ARDUBOY_PIN_BATTERY) * 3100UL) / 4095UL;
+            }
+            samples[i] = mv;
+            delayMicroseconds(60);
+        }
+
+        // Ordenamiento por inserción para descartar picos de ruido (Wi-Fi/I2C)
+        for (int i = 1; i < N; i++) {
+            uint32_t key = samples[i];
+            int j = i - 1;
+            while (j >= 0 && samples[j] > key) {
+                samples[j + 1] = samples[j];
+                j--;
+            }
+            samples[j + 1] = key;
+        }
+
+        // Promediar el 50% central (descartar los 8 más bajos y 8 más altos)
+        uint32_t sum = 0;
+        for (int i = 8; i < 24; i++) {
+            sum += samples[i];
+        }
+        float pinMv = (float)sum / 16.0f;
+        float currentVoltage = (pinMv * 2.0f) / 1000.0f;
+
+        // Filtro Exponencial (EMA): 85% retención, 15% nueva muestra para máxima estabilidad
+        if (smoothedVoltage <= 0.5f || forceUpdate) {
+            smoothedVoltage = currentVoltage;
+        } else {
+            smoothedVoltage = (smoothedVoltage * 0.85f) + (currentVoltage * 0.15f);
+        }
+
+        // Curva Li-Ion quimica multi-tramo (4.18V = 100%, 3.30V = 0%)
+        int targetPct = 0;
+        if (smoothedVoltage >= 4.18f) {
+            targetPct = 100;
+        } else if (smoothedVoltage <= 3.30f) {
+            targetPct = 0;
+        } else if (smoothedVoltage >= 4.00f) {
+            targetPct = (int)(85.0f + ((smoothedVoltage - 4.00f) / (4.18f - 4.00f)) * 15.0f);
+        } else if (smoothedVoltage >= 3.82f) {
+            targetPct = (int)(60.0f + ((smoothedVoltage - 3.82f) / (4.00f - 3.82f)) * 25.0f);
+        } else if (smoothedVoltage >= 3.68f) {
+            targetPct = (int)(30.0f + ((smoothedVoltage - 3.68f) / (3.82f - 3.68f)) * 30.0f);
+        } else if (smoothedVoltage >= 3.50f) {
+            targetPct = (int)(10.0f + ((smoothedVoltage - 3.50f) / (3.68f - 3.50f)) * 20.0f);
+        } else {
+            targetPct = (int)(((smoothedVoltage - 3.30f) / (3.50f - 3.30f)) * 10.0f);
+        }
+        if (targetPct < 0) targetPct = 0;
+        if (targetPct > 100) targetPct = 100;
+
+        // Histéresis: No cambiar porcentaje si la variación es solo de 1% (evita oscilación)
+        if (smoothedPercentage == 0 || forceUpdate) {
+            smoothedPercentage = targetPct;
+        } else {
+            if (abs(targetPct - smoothedPercentage) >= 2) {
+                if (targetPct > smoothedPercentage) {
+                    smoothedPercentage++;
+                } else {
+                    smoothedPercentage--;
+                }
+            }
+        }
+    }
+
+    static void initBattery() {
+        #if defined(ESP32)
+        gpio_reset_pin((gpio_num_t)ARDUBOY_PIN_BATTERY);
+        pinMode(ARDUBOY_PIN_BATTERY, ANALOG);
+        analogSetPinAttenuation(ARDUBOY_PIN_BATTERY, ADC_11db);
+        #endif
+        // Pre-cargar el filtro al encendido para que el primer valor sea inmediato y exacto
+        for (int i = 0; i < 4; i++) {
+            updateBatteryTelemetry(true);
+            delay(10);
+        }
+    }
+
+    static uint32_t getBatteryRawMilliVolts() {
+        updateBatteryTelemetry(false);
+        return (uint32_t)((smoothedVoltage * 1000.0f) / 2.0f);
+    }
+
+    static float getBatteryVoltage() {
+        updateBatteryTelemetry(false);
+        return smoothedVoltage;
+    }
+
+    static int getBatteryPercentage() {
+        updateBatteryTelemetry(false);
+        return smoothedPercentage;
+    }
 };

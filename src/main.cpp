@@ -11,6 +11,7 @@
 #include "braindu_bitmaps.h"
 #include "hangman_words.h"
 #include "MathChallenge.h"
+#include "WordSearchGame.h"
 #include "WiFiGamepadServer.h"
 
 // =============================================================================
@@ -28,6 +29,18 @@ const char* const volumeLabels[] = {"MUTE", "BAJO", "MEDIO", "ALTO"};
 
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
+
+// =============================================================================
+// HARDWARE HOUR METER & NVS USAGE TELEMETRY (NVS "sys_stats")
+// =============================================================================
+Preferences preferences;
+uint32_t totalPlaySeconds = 0;
+uint32_t sessionSeconds = 0;
+static uint32_t lastPlayTimeTickMs = 0;
+static uint32_t lastNvsSaveSeconds = 0;
+static uint32_t resetHoldStartTime = 0;
+static bool resetTriggered = false;
+static uint32_t resetFeedbackUntil = 0;
 
 // =============================================================================
 // SYSTEM CONFIGURATION & HARDWARE PERSISTENCE (NVS "sys_cfg")
@@ -69,25 +82,48 @@ void saveSystemSettings() {
     }
 }
 
-void getBatteryStatus(float &voltage, int &percentage) {
-    analogSetAttenuation(ADC_11db);
-    uint32_t rawMv = analogReadMilliVolts(0);
+// =============================================================================
+// BATTERY TELEMETRY SUBSYSTEM (GPIO 1 / ADC1_CH1 - 100k/100k Voltage Divider)
+// =============================================================================
+uint32_t getBatteryRawMilliVolts() {
+    return Arduboy2Core::getBatteryRawMilliVolts();
+}
 
-    float vBat = 0.0f;
-    if (rawMv >= 400 && rawMv <= 2500) {
-        vBat = (rawMv * 2.0f) / 1000.0f; // Divisor de tensión 2:1 en GPIO 0
-    } else if (rawMv > 2500) {
-        vBat = rawMv / 1000.0f;
-    } else {
-        vBat = 4.12f; // Alimentación por USB / lectura nominal
+float getBatteryVoltage() {
+    return Arduboy2Core::getBatteryVoltage();
+}
+
+int getBatteryPercentage() {
+    float v = getBatteryVoltage();
+
+    if (v >= 4.18f) return 100;
+    if (v <= 3.30f) return 0;
+
+    // Tramo 1: 4.18V a 4.00V (100% a 85%) - Caída inicial rápida
+    if (v >= 4.00f) {
+        return (int)(85.0f + ((v - 4.00f) / (4.18f - 4.00f)) * 15.0f);
     }
+    // Tramo 2: 4.00V a 3.82V (85% a 60%)
+    else if (v >= 3.82f) {
+        return (int)(60.0f + ((v - 3.82f) / (4.00f - 3.82f)) * 25.0f);
+    }
+    // Tramo 3: 3.82V a 3.68V (60% a 30%) - Meseta principal de descarga
+    else if (v >= 3.68f) {
+        return (int)(30.0f + ((v - 3.68f) / (3.82f - 3.68f)) * 30.0f);
+    }
+    // Tramo 4: 3.68V a 3.50V (30% a 10%)
+    else if (v >= 3.50f) {
+        return (int)(10.0f + ((v - 3.50f) / (3.68f - 3.50f)) * 20.0f);
+    }
+    // Tramo 5: 3.50V a 3.30V (10% a 0%) - Zona crítica de corte
+    else {
+        return (int)(((v - 3.30f) / (3.50f - 3.30f)) * 10.0f);
+    }
+}
 
-    int pct = (int)((vBat - 3.30f) / (4.20f - 3.30f) * 100.0f);
-    if (pct < 0) pct = 0;
-    if (pct > 100) pct = 100;
-
-    voltage = vBat;
-    percentage = pct;
+void getBatteryStatus(float &voltage, int &percentage) {
+    voltage = getBatteryVoltage();
+    percentage = getBatteryPercentage();
 }
 
 // =============================================================================
@@ -775,15 +811,15 @@ struct PingPongGame {
     void updateWifi2P() {
         wifiGamepads.update();
 
-        // Botón B: Regresar al menú de Ping Pong y apagar SoftAP
-        if (arduboy.justPressed(B_BUTTON)) {
-            sound.tone(1400, 30);
-            init();
-            return;
-        }
-
         // Pantalla de Lobby previo al saque
         if (!wifiMatchStarted) {
+            // Botón B: Regresar al menú de Ping Pong y apagar SoftAP
+            if (arduboy.justPressed(B_BUTTON)) {
+                sound.tone(1400, 30);
+                init();
+                return;
+            }
+
             // El host puede pulsar A para arrancar la partida
             if (arduboy.justPressed(A_BUTTON)) {
                 sound.tone(1760, 40);
@@ -6584,6 +6620,7 @@ struct TrisGame {
 } trisGame;
 
 MathChallengeGame mathChallenge;
+WordSearchGame wordSearchGame;
 
 
 
@@ -6607,6 +6644,7 @@ enum SystemState {
     STATE_HANGMAN,
     STATE_TRIS,
     STATE_MATH_CHALLENGE,
+    STATE_SOPA,
     STATE_PIN_DIAGNOSTIC,
     STATE_SETTINGS
 };
@@ -6631,13 +6669,15 @@ const char* menuItems[] = {
     "13. Hangman",
     "14. TRIS",
     "15. Math Challenge",
-    "16. Test Pines Cruceta"
+    "16. Sopa de Letras",
+    "17. Test Pines Cruceta"
 };
-const uint8_t MENU_COUNT = 16;
+const uint8_t MENU_COUNT = 17;
 
 
 // System Pause & Power Management State
 bool gamePaused = false;
+int8_t pauseMenuCursor = 0;
 bool isScreenSleeping = false;
 unsigned long bootRawLowStart = 0;
 bool bootDebouncedDown = false;
@@ -6697,6 +6737,9 @@ bool isCurrentGameActive() {
         case STATE_MATH_CHALLENGE:
             return (mathChallenge.state == MATH_STATE_PLAYING || mathChallenge.state == MATH_STATE_FEEDBACK);
 
+        case STATE_SOPA:
+            return (wordSearchGame.state == SOPA_STATE_PLAYING);
+
         default:
             return false;
     }
@@ -6726,6 +6769,8 @@ void returnToCurrentGameSubmenu() {
     sound.noTone();
     sound.tone(880, 30);
     gamePaused = false;
+    pauseMenuCursor = 0;
+    Arduboy2Core::previousButtonState = Arduboy2Core::currentButtonState;
     switch (currentState) {
         case STATE_PING_PONG:
             pingPong.init();
@@ -6760,22 +6805,34 @@ void exitCurrentGameToMainMenu() {
         game2048.saveHighScore();
     } else if (currentState == STATE_MATH_CHALLENGE) {
         mathChallenge.saveHighScore();
+    } else if (currentState == STATE_SOPA) {
+        wordSearchGame.saveHighScore();
     }
     melodyPlayer.stop();
     sound.noTone();
     sound.tone(600, 30);
     gamePaused = false;
+    pauseMenuCursor = 0;
+    Arduboy2Core::previousButtonState = Arduboy2Core::currentButtonState;
     currentState = STATE_MENU;
 }
 
 void enterDeepSleep(const char* message = "APAGANDO...") {
+    if (wifiGamepads.isRunning) {
+        wifiGamepads.stop();
+    }
+    WiFi.mode(WIFI_OFF);
     if (currentState == STATE_PROYECTO_BLE) {
         proyectoBLE.stop();
     } else if (currentState == STATE_2048) {
         game2048.saveHighScore();
     } else if (currentState == STATE_MATH_CHALLENGE) {
         mathChallenge.saveHighScore();
+    } else if (currentState == STATE_SOPA) {
+        wordSearchGame.saveHighScore();
     }
+    // Guardar cuentahoras en NVS ("sys_stats") antes de apagar
+    preferences.putUInt("play_time", totalPlaySeconds);
     melodyPlayer.stop();
     arduboy.clear();
     arduboy.fillRect(10, 18, 108, 28, BLACK);
@@ -6824,6 +6881,7 @@ void setup() {
     currentState = STATE_MENU;
     menuCursor = 0;
     gamePaused = false;
+    pauseMenuCursor = 0;
     isScreenSleeping = false;
 
     // -------------------------------------------------------------------------
@@ -6869,12 +6927,23 @@ void setup() {
 
     // Asegurar configuración limpia y aislamiento de todos los pines de control
     Arduboy2Core::initPins();
+    Arduboy2Core::initBattery();
 
     // Ensure RGB LED starts OFF
     rgbLedWrite(RGB_LED_PIN, 0, 0, 0);
 
+    // Asegurar que la radio Wi-Fi inicie completamente apagada (modo 1P y ahorro de energia)
+    WiFi.mode(WIFI_OFF);
+
     // Cargar y aplicar brillo de pantalla y volumen desde NVS ("sys_cfg")
     loadSystemSettings();
+
+    // Inicializar cuentahoras persistente en NVS ("sys_stats")
+    preferences.begin("sys_stats", false);
+    totalPlaySeconds = preferences.getUInt("play_time", 0);
+    lastNvsSaveSeconds = totalPlaySeconds;
+    lastPlayTimeTickMs = millis();
+    sessionSeconds = 0;
 
     // Estabilización y purga de transitorios de arranque en botones
     delay(100);
@@ -6897,6 +6966,7 @@ void setup() {
 void launchSelectedGame() {
     sound.tone(1760, 50);
     gamePaused = false;
+    pauseMenuCursor = 0;
     if (menuCursor == 0) { pingPong.init(); currentState = STATE_PING_PONG; }
     else if (menuCursor == 1) { breakout.init(); currentState = STATE_BREAKOUT; }
     else if (menuCursor == 2) { spaceInvaders.init(); currentState = STATE_SPACE_INVADERS; }
@@ -6912,7 +6982,8 @@ void launchSelectedGame() {
     else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
     else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
     else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
-    else if (menuCursor == 15) { currentState = STATE_PIN_DIAGNOSTIC; }
+    else if (menuCursor == 15) { wordSearchGame.init(); currentState = STATE_SOPA; }
+    else if (menuCursor == 16) { currentState = STATE_PIN_DIAGNOSTIC; }
 }
 
 // -------------------------------------------------------------------------
@@ -6966,7 +7037,7 @@ void drawSettingsScreen() {
     arduboy.setTextColor(WHITE);
 
     // Item 0: Brillo Pantalla (10% a 100%)
-    int16_t y0 = 12;
+    int16_t y0 = 10;
     if (settingsCursor == 0) {
         arduboy.fillRect(2, y0 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
@@ -6974,13 +7045,9 @@ void drawSettingsScreen() {
     arduboy.setCursor(4, y0);
     arduboy.printf("1.BRILLO : [ %3d%% ]", sysBrightness);
     arduboy.setTextColor(WHITE);
-    // Barra gráfica de brillo
-    uint8_t barW = (uint8_t)map(sysBrightness, 10, 100, 6, 80);
-    arduboy.drawRect(24, y0 + 9, 82, 3, WHITE);
-    arduboy.fillRect(25, y0 + 10, barW, 1, WHITE);
 
     // Item 1: Volumen / Audio
-    int16_t y1 = 26;
+    int16_t y1 = 19;
     if (settingsCursor == 1) {
         arduboy.fillRect(2, y1 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
@@ -6989,49 +7056,99 @@ void drawSettingsScreen() {
     arduboy.printf("2.VOLUMEN: [ %-5s ]", volumeLabels[sysVolume]);
     arduboy.setTextColor(WHITE);
 
-    // Item 2: Batería (Lectura ADC en GPIO 0 - Porcentaje %)
-    int16_t y2 = 37;
-    float vBat = 0.0f;
-    int batPct = 0;
-    getBatteryStatus(vBat, batPct);
-    uint8_t colorItem2 = WHITE;
+    // Item 2: Batería (Lectura ADC en GPIO 2 - Voltaje y Porcentaje Li-Ion estabilizado)
+    int16_t y2 = 28;
+    float vBat = getBatteryVoltage();
+    int batPct = getBatteryPercentage();
+
     if (settingsCursor == 2) {
         arduboy.fillRect(2, y2 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
-        colorItem2 = BLACK;
+    } else {
+        arduboy.setTextColor(WHITE);
     }
-    arduboy.setCursor(4, y2);
-    arduboy.printf("3.BATERIA: %3d%%", batPct);
+
+    char batStr[24];
+    snprintf(batStr, sizeof(batStr), "BATT: %d%% (%.2fV)", batPct, vBat);
+    int16_t strLen = (int16_t)strlen(batStr);
+    int16_t xBat = (128 - (strLen * 6)) / 2;
+    if (xBat < 2) xBat = 2;
+
+    arduboy.setCursor(xBat, y2);
+    arduboy.print(batStr);
     arduboy.setTextColor(WHITE);
 
-    // Icono visual de nivel de batería
-    arduboy.drawRect(104, y2, 14, 7, colorItem2);
-    arduboy.drawFastVLine(118, y2 + 2, 3, colorItem2);
-    uint8_t batFill = (uint8_t)map(batPct, 0, 100, 0, 10);
-    if (batFill > 0) {
-        arduboy.fillRect(106, y2 + 2, batFill, 3, colorItem2);
-    }
-
-    // Item 3: Salir / Guardar
-    int16_t y3 = 48;
+    // Item 3: Tiempo de Uso (Cuentahoras acumulado persistente NVS)
+    int16_t y3 = 37;
     if (settingsCursor == 3) {
         arduboy.fillRect(2, y3 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
+    } else {
+        arduboy.setTextColor(WHITE);
+    }
+
+    if (millis() < resetFeedbackUntil) {
         arduboy.setCursor(10, y3);
+        arduboy.print("!RESETEADO A CERO!");
+    } else if (settingsCursor == 3 && resetHoldStartTime > 0 && !resetTriggered) {
+        uint32_t holdMs = millis() - resetHoldStartTime;
+        if (holdMs > 2000) holdMs = 2000;
+        int pct = (int)((holdMs * 100) / 2000);
+        char holdStr[24];
+        snprintf(holdStr, sizeof(holdStr), "RESET: [ %3d%% ]", pct);
+        int16_t xH = (128 - ((int16_t)strlen(holdStr) * 6)) / 2;
+        if (xH < 2) xH = 2;
+        arduboy.setCursor(xH, y3);
+        arduboy.print(holdStr);
+    } else {
+        uint32_t hrs = totalPlaySeconds / 3600;
+        uint32_t mins = (totalPlaySeconds % 3600) / 60;
+        uint32_t secs = totalPlaySeconds % 60;
+        char useStr[24];
+        if (hrs < 100) {
+            snprintf(useStr, sizeof(useStr), "USO: %02uh %02um %02us", (unsigned int)hrs, (unsigned int)mins, (unsigned int)secs);
+        } else {
+            snprintf(useStr, sizeof(useStr), "USO: %luh %02um", (unsigned long)hrs, (unsigned int)mins);
+        }
+        int16_t strLenUse = (int16_t)strlen(useStr);
+        int16_t xUse = (128 - (strLenUse * 6)) / 2;
+        if (xUse < 2) xUse = 2;
+        arduboy.setCursor(xUse, y3);
+        arduboy.print(useStr);
+    }
+    arduboy.setTextColor(WHITE);
+
+    // Item 4: Salir / Guardar
+    int16_t y4 = 46;
+    if (settingsCursor == 4) {
+        arduboy.fillRect(2, y4 - 1, 124, 9, WHITE);
+        arduboy.setTextColor(BLACK);
+        arduboy.setCursor(10, y4);
         arduboy.print("> GUARDAR Y SALIR <");
         arduboy.setTextColor(WHITE);
     } else {
-        arduboy.setCursor(12, y3);
+        arduboy.setCursor(12, y4);
         arduboy.print("[ GUARDAR Y SALIR ]");
     }
 
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    arduboy.print("B:- A:+ | RIGHT:MENU");
+    if (settingsCursor == 3) {
+        arduboy.print("MANTEN A:RESET | R:MENU");
+    } else {
+        arduboy.print("B:- A:+ | RIGHT:MENU");
+    }
 }
 
 void transitionMenuToSettings() {
+    // REGLA DE SEGURIDAD NVS: Guardar cuentahoras al transicionar a Ajustes
+    preferences.putUInt("play_time", totalPlaySeconds);
+    lastNvsSaveSeconds = totalPlaySeconds;
+    resetHoldStartTime = 0;
+    resetTriggered = false;
+    resetFeedbackUntil = 0;
+
     sound.tone(1100, 25);
 
     // 1. Capturar pantalla de Menú
@@ -7068,6 +7185,13 @@ void transitionMenuToSettings() {
 
 void transitionSettingsToMenu() {
     saveSystemSettings();
+    // Guardar cuentahoras al regresar al Menú Principal
+    preferences.putUInt("play_time", totalPlaySeconds);
+    lastNvsSaveSeconds = totalPlaySeconds;
+    resetHoldStartTime = 0;
+    resetTriggered = false;
+    resetFeedbackUntil = 0;
+
     sound.tone(880, 25);
 
     // 1. Capturar pantalla de Ajustes
@@ -7122,6 +7246,22 @@ void loop() {
     updateRgbLed();
     sound.update();
     melodyPlayer.update();
+
+    // -------------------------------------------------------------------------
+    // CUENTAHORAS / CRONÓMETRO DE USO EN NVS ("sys_stats")
+    // -------------------------------------------------------------------------
+    uint32_t nowTimeMs = millis();
+    if (nowTimeMs - lastPlayTimeTickMs >= 1000) {
+        lastPlayTimeTickMs = nowTimeMs;
+        totalPlaySeconds++;
+        sessionSeconds++;
+
+        // Regla de seguridad NVS Flash: guardar únicamente cada 60 segundos
+        if (totalPlaySeconds - lastNvsSaveSeconds >= 60) {
+            lastNvsSaveSeconds = totalPlaySeconds;
+            preferences.putUInt("play_time", totalPlaySeconds);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // STANDBY POR SOFTWARE / SCREEN BLANKING (WAKEUP INMEDIATO SIN BUG I2C)
@@ -7196,6 +7336,7 @@ void loop() {
                         sound.tone(900, 30);
                     } else if (isCurrentGameActive()) {
                         gamePaused = true;
+                        pauseMenuCursor = 0;
                         melodyPlayer.stop();
                         sound.noTone();
                         sound.tone(600, 30);
@@ -7235,34 +7376,61 @@ void loop() {
 
     arduboy.clear();
 
-    // GESTOR GLOBAL DE PAUSA Y SALIDA UNIVERSAL (GPIO 20, B, A)
+    bool wasPausedThisFrame = gamePaused;
+
+    // GESTOR GLOBAL DE PAUSA Y SALIDA UNIVERSAL (BOTON B, A, UP, DOWN)
     if (currentState != STATE_MENU && currentState != STATE_SETTINGS && currentState != STATE_PIN_DIAGNOSTIC) {
         if (gamePaused) {
-            // Mientras esté activo el estado de pausa:
-            // 1. GPIO 20 (Centro): Quita la pausa y reanuda el bucle del juego
-            if (arduboy.justPressed(CLICK_BUTTON)) {
-                gamePaused = false;
+            bool hasSub = currentGameHasSubmenu();
+            int8_t pauseItemCount = hasSub ? 3 : 2;
+
+            // 1. Navegación vertical entre opciones con UP y DOWN
+            if (arduboy.justPressed(UP_BUTTON)) {
+                sound.tone(880, 15);
+                pauseMenuCursor--;
+                if (pauseMenuCursor < 0) {
+                    pauseMenuCursor = pauseItemCount - 1;
+                }
+            } else if (arduboy.justPressed(DOWN_BUTTON)) {
+                sound.tone(700, 15);
+                pauseMenuCursor++;
+                if (pauseMenuCursor >= pauseItemCount) {
+                    pauseMenuCursor = 0;
+                }
+            }
+
+            // 2. Botón B: Alternador de pausa / Atajo rápido para despausar inmediatamente
+            if (arduboy.justPressed(B_BUTTON)) {
                 sound.tone(900, 30);
+                gamePaused = false;
             }
-            // 2. Botón B: Termina la partida actual, detiene timers/WiFi y cambia directamente a STATE_MENU
-            else if (arduboy.justPressed(B_BUTTON)) {
-                exitCurrentGameToMainMenu();
-            }
-            // 3. Botón A: Si el juego cuenta con menú de opciones propio, regresa a dicho menú
-            else if (currentGameHasSubmenu() && arduboy.justPressed(A_BUTTON)) {
-                returnToCurrentGameSubmenu();
+            // 3. Botón A: Ejecutar opción seleccionada
+            else if (arduboy.justPressed(A_BUTTON)) {
+                if (pauseMenuCursor == 0) {
+                    // 'Continuar': Reanuda la partida
+                    sound.tone(900, 30);
+                    gamePaused = false;
+                } else if (hasSub && pauseMenuCursor == 1) {
+                    // 'Menu Juego': Regresa al menú interno del juego actual
+                    returnToCurrentGameSubmenu();
+                } else {
+                    // 'Menu Consola': Detiene el juego por completo, limpia estados temporales y transiciona a STATE_MENU
+                    exitCurrentGameToMainMenu();
+                }
             }
         } else {
-            // Aislamiento de Pausa:
-            // El Click Central (GPIO 20) ÚNICAMENTE responde si el estado actual es de juego activo
-            if (isCurrentGameActive() && arduboy.justPressed(CLICK_BUTTON)) {
+            // Activar pausa con Botón B si el juego está en curso activo
+            if (isCurrentGameActive() && arduboy.justPressed(B_BUTTON)) {
                 gamePaused = true;
+                pauseMenuCursor = 0;
                 melodyPlayer.stop();
                 sound.noTone();
                 sound.tone(600, 30);
             }
         }
     }
+
+    bool allowGameUpdate = !gamePaused && !wasPausedThisFrame;
 
     // Universal Exit Combo: Hold A + B (o LEFT + B) >= 450ms returns to menu
     if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS) {
@@ -7296,27 +7464,30 @@ void loop() {
 
             drawMainMenuScreen();
 
-            // Navegación Vertical: EXCLUSIVAMENTE con la cruceta (UP y DOWN)
-            if (arduboy.justPressed(UP_BUTTON)) {
-                sound.tone(880, 15);
-                menuCursor--;
-                if (menuCursor < 0) menuCursor = MENU_COUNT - 1;
-            }
-            if (arduboy.justPressed(DOWN_BUTTON)) {
-                sound.tone(700, 15);
-                menuCursor++;
-                if (menuCursor >= MENU_COUNT) menuCursor = 0;
-            }
+            // Bloquear lectura de controles en la misma trama de transición desde la pausa
+            if (!wasPausedThisFrame) {
+                // Navegación Vertical: EXCLUSIVAMENTE con la cruceta (UP y DOWN)
+                if (arduboy.justPressed(UP_BUTTON)) {
+                    sound.tone(880, 15);
+                    menuCursor--;
+                    if (menuCursor < 0) menuCursor = MENU_COUNT - 1;
+                }
+                if (arduboy.justPressed(DOWN_BUTTON)) {
+                    sound.tone(700, 15);
+                    menuCursor++;
+                    if (menuCursor >= MENU_COUNT) menuCursor = 0;
+                }
 
-            // Transición de deslizamiento horizontal hacia Ajustes al pulsar LEFT
-            if (arduboy.justPressed(LEFT_BUTTON)) {
-                transitionMenuToSettings();
-                break;
-            }
+                // Transición de deslizamiento horizontal hacia Ajustes al pulsar LEFT
+                if (arduboy.justPressed(LEFT_BUTTON)) {
+                    transitionMenuToSettings();
+                    break;
+                }
 
-            // Confirmación y lanzamiento al presionar Botón A (GPIO 3)
-            if (arduboy.justPressed(A_BUTTON)) {
-                launchSelectedGame();
+                // Confirmación y lanzamiento al presionar Botón A (GPIO 3)
+                if (arduboy.justPressed(A_BUTTON)) {
+                    launchSelectedGame();
+                }
             }
             break;
         }
@@ -7328,80 +7499,89 @@ void loop() {
                 currentState = STATE_MENU;
                 break;
             }
-            if (!gamePaused) pingPong.update();
+            if (allowGameUpdate) pingPong.update();
             pingPong.draw();
             break;
 
         case STATE_BREAKOUT:
-            if (!gamePaused) breakout.update();
+            if (allowGameUpdate) breakout.update();
             breakout.draw();
             break;
 
         case STATE_SPACE_INVADERS:
-            if (!gamePaused) spaceInvaders.update();
+            if (allowGameUpdate) spaceInvaders.update();
             spaceInvaders.draw();
             break;
 
         case STATE_1943:
-            if (!gamePaused) airCombat.update();
+            if (allowGameUpdate) airCombat.update();
             airCombat.draw();
             break;
 
         case STATE_FLAPPY_BIRD:
-            if (!gamePaused) flappy.update();
+            if (allowGameUpdate) flappy.update();
             flappy.draw();
             break;
 
         case STATE_SNAKE:
-            if (!gamePaused) snake.update();
+            if (allowGameUpdate) snake.update();
             snake.draw();
             break;
 
         case STATE_JUMP_MAN:
-            if (!gamePaused) jumpMan.update();
+            if (allowGameUpdate) jumpMan.update();
             jumpMan.draw();
             break;
 
         case STATE_PROYECTO_BLE:
-            if (!gamePaused) proyectoBLE.update();
+            if (allowGameUpdate) proyectoBLE.update();
             proyectoBLE.draw();
             break;
 
         case STATE_2048:
-            if (!gamePaused) game2048.update();
+            if (allowGameUpdate) game2048.update();
             game2048.draw();
             break;
 
         case STATE_TREX_RUNNER:
-            if (!gamePaused) trexRunner.update();
+            if (allowGameUpdate) trexRunner.update();
             trexRunner.draw();
             break;
 
         case STATE_TIC_TAC_TOE:
-            if (!gamePaused) ticTacToe.update();
+            if (allowGameUpdate) ticTacToe.update();
             ticTacToe.draw();
             break;
 
         case STATE_BRAINDU_TRAIN:
-            if (!gamePaused) brainduTrain.update();
+            if (allowGameUpdate) brainduTrain.update();
             brainduTrain.draw();
             break;
 
         case STATE_HANGMAN:
-            if (!gamePaused) hangmanGame.update();
+            if (allowGameUpdate) hangmanGame.update();
             hangmanGame.draw();
             break;
 
         case STATE_TRIS:
-            if (!gamePaused) trisGame.update();
+            if (allowGameUpdate) trisGame.update();
             trisGame.draw();
             break;
 
         case STATE_MATH_CHALLENGE:
-            if (!gamePaused) mathChallenge.update();
+            if (allowGameUpdate) mathChallenge.update();
             mathChallenge.draw();
             if (mathChallenge.exitRequested) {
                 mathChallenge.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+
+        case STATE_SOPA:
+            if (allowGameUpdate) wordSearchGame.update();
+            wordSearchGame.draw();
+            if (wordSearchGame.exitRequested) {
+                wordSearchGame.exitRequested = false;
                 currentState = STATE_MENU;
             }
             break;
@@ -7522,16 +7702,45 @@ void loop() {
                 break;
             }
 
-            // Navegación Vertical entre opciones con UP y DOWN
+            // Navegación Vertical entre opciones con UP y DOWN (5 elementos en carrusel)
             if (arduboy.justPressed(UP_BUTTON)) {
                 sound.tone(880, 15);
                 settingsCursor--;
-                if (settingsCursor < 0) settingsCursor = 3;
+                if (settingsCursor < 0) settingsCursor = 4;
+                resetHoldStartTime = 0;
+                resetTriggered = false;
             }
             if (arduboy.justPressed(DOWN_BUTTON)) {
                 sound.tone(700, 15);
                 settingsCursor++;
-                if (settingsCursor > 3) settingsCursor = 0;
+                if (settingsCursor > 4) settingsCursor = 0;
+                resetHoldStartTime = 0;
+                resetTriggered = false;
+            }
+
+            // GESTIÓN DE RESET POR PULSACIÓN SOSTENIDA DE 2 SEGUNDOS EN "TIEMPO USO" (Item 3)
+            if (settingsCursor == 3) {
+                if (arduboy.pressed(A_BUTTON)) {
+                    if (resetHoldStartTime == 0) {
+                        resetHoldStartTime = millis();
+                    } else if (!resetTriggered && (millis() - resetHoldStartTime >= 2000)) {
+                        totalPlaySeconds = 0;
+                        sessionSeconds = 0;
+                        lastNvsSaveSeconds = 0;
+                        preferences.putUInt("play_time", 0);
+                        resetTriggered = true;
+                        resetFeedbackUntil = millis() + 1500;
+                        sound.tone(1400, 60);
+                        delay(70);
+                        sound.tone(1800, 100);
+                    }
+                } else {
+                    resetHoldStartTime = 0;
+                    resetTriggered = false;
+                }
+            } else {
+                resetHoldStartTime = 0;
+                resetTriggered = false;
             }
 
             // DISMINUIR con Botón B (GPIO 4) o cruceta LEFT
@@ -7551,7 +7760,7 @@ void loop() {
                     } else {
                         sound.tone(600, 15);
                     }
-                } else if (settingsCursor == 2) {
+                } else if (settingsCursor == 2 || settingsCursor == 3) {
                     sound.tone(900, 20);
                 }
             }
@@ -7576,6 +7785,9 @@ void loop() {
                 } else if (settingsCursor == 2) {
                     sound.tone(900, 20);
                 } else if (settingsCursor == 3) {
+                    // Item 3 utiliza pulsación sostenida (hold >= 2s) para reiniciar
+                    sound.tone(900, 20);
+                } else if (settingsCursor == 4) {
                     transitionSettingsToMenu();
                     break;
                 }
@@ -7587,26 +7799,29 @@ void loop() {
     // Cuadro de Pausa Universal Centrado con drawRoundRect
     if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS && gamePaused) {
         bool hasSub = currentGameHasSubmenu();
-        const int16_t w = 114;
-        const int16_t h = hasSub ? 46 : 36;
-        const int16_t x = (128 - w) / 2;
-        const int16_t y = (64 - h) / 2;
 
-        arduboy.fillRect(x, y, w, h, BLACK);
-        arduboy.drawRoundRect(x, y, w, h, 3, WHITE);
+        arduboy.fillRect(14, 10, 100, 44, BLACK);
+        arduboy.drawRoundRect(14, 10, 100, 44, 3, WHITE);
 
-        arduboy.setCursor((128 - (9 * 6)) / 2, y + 4);
+        arduboy.setTextColor(WHITE);
+        arduboy.setCursor((128 - (9 * 6)) / 2, 13);
         arduboy.print("[ PAUSA ]");
 
-        arduboy.setCursor((128 - (16 * 6)) / 2, y + 14);
-        arduboy.print("Centro: Reanudar");
-
-        arduboy.setCursor((128 - (15 * 6)) / 2, y + 24);
-        arduboy.print("B: Salir a Menu");
-
         if (hasSub) {
-            arduboy.setCursor((128 - (13 * 6)) / 2, y + 34);
-            arduboy.print("A: Menu Juego");
+            arduboy.setCursor(20, 23);
+            arduboy.print(pauseMenuCursor == 0 ? "> Continuar" : "  Continuar");
+
+            arduboy.setCursor(20, 32);
+            arduboy.print(pauseMenuCursor == 1 ? "> Menu Juego" : "  Menu Juego");
+
+            arduboy.setCursor(20, 41);
+            arduboy.print(pauseMenuCursor == 2 ? "> Menu Consola" : "  Menu Consola");
+        } else {
+            arduboy.setCursor(20, 25);
+            arduboy.print(pauseMenuCursor == 0 ? "> Continuar" : "  Continuar");
+
+            arduboy.setCursor(20, 36);
+            arduboy.print(pauseMenuCursor == 1 ? "> Menu Consola" : "  Menu Consola");
         }
     }
 

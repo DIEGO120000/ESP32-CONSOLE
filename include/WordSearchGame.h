@@ -1,0 +1,369 @@
+#pragma once
+#include <Arduino.h>
+#include <Preferences.h>
+#include "Arduboy2.h"
+#include "ArduboyTones.h"
+
+extern Arduboy2 arduboy;
+extern ArduboyTones sound;
+
+enum SopaState : uint8_t {
+    SOPA_STATE_PLAYING = 0,
+    SOPA_STATE_VICTORY
+};
+
+struct SopaWord {
+    const char* text;
+    int8_t startC;
+    int8_t startR;
+    int8_t endC;
+    int8_t endR;
+    bool found;
+};
+
+struct SopaTheme {
+    const char* name;
+    const char grid[6][14];
+    uint8_t wordCount;
+    SopaWord words[5];
+};
+
+static const uint8_t TOTAL_SOPA_THEMES = 8;
+
+// -----------------------------------------------------------------------------
+// FUENTE RETRO 5x5 PARA LA MATRIZ DE LETRAS (ESPACIADO GRANDE Y SIMÉTRICO)
+// -----------------------------------------------------------------------------
+static const uint8_t PROGMEM font5x5[26][5] = {
+    {0x0E, 0x11, 0x1F, 0x11, 0x11}, // A
+    {0x1E, 0x11, 0x1E, 0x11, 0x1E}, // B
+    {0x0E, 0x11, 0x10, 0x11, 0x0E}, // C
+    {0x1C, 0x12, 0x11, 0x12, 0x1C}, // D
+    {0x1F, 0x10, 0x1E, 0x10, 0x1F}, // E
+    {0x1F, 0x10, 0x1E, 0x10, 0x10}, // F
+    {0x0E, 0x11, 0x13, 0x11, 0x0F}, // G
+    {0x11, 0x11, 0x1F, 0x11, 0x11}, // H
+    {0x0E, 0x04, 0x04, 0x04, 0x0E}, // I
+    {0x07, 0x02, 0x02, 0x12, 0x0C}, // J
+    {0x11, 0x12, 0x1C, 0x12, 0x11}, // K
+    {0x10, 0x10, 0x10, 0x10, 0x1F}, // L
+    {0x11, 0x1B, 0x15, 0x11, 0x11}, // M
+    {0x11, 0x19, 0x15, 0x13, 0x11}, // N
+    {0x0E, 0x11, 0x11, 0x11, 0x0E}, // O
+    {0x1E, 0x11, 0x1E, 0x10, 0x10}, // P
+    {0x0E, 0x11, 0x15, 0x12, 0x0D}, // Q
+    {0x1E, 0x11, 0x1E, 0x12, 0x11}, // R
+    {0x0F, 0x10, 0x0E, 0x01, 0x1E}, // S
+    {0x1F, 0x04, 0x04, 0x04, 0x04}, // T
+    {0x11, 0x11, 0x11, 0x11, 0x0E}, // U
+    {0x11, 0x11, 0x11, 0x0A, 0x04}, // V
+    {0x11, 0x11, 0x15, 0x1B, 0x11}, // W
+    {0x11, 0x0A, 0x04, 0x0A, 0x11}, // X
+    {0x11, 0x0A, 0x04, 0x04, 0x04}, // Y
+    {0x1F, 0x02, 0x04, 0x08, 0x1F}  // Z
+};
+
+static inline void drawLetter5x5(int16_t x, int16_t y, char c, uint8_t color) {
+    if (c >= 'a' && c <= 'z') c -= 32;
+    if (c < 'A' || c > 'Z') return;
+    uint8_t idx = c - 'A';
+    for (int8_t r = 0; r < 5; r++) {
+        uint8_t row = pgm_read_byte(&font5x5[idx][r]);
+        for (int8_t b = 0; b < 5; b++) {
+            if (row & (1 << (4 - b))) {
+                arduboy.drawPixel(x + b, y + r, color);
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FUENTE MICRO-PIXEL 3x5 PARA EL PANEL LATERAL (A-Z, 0-9, SIMBOLOS)
+// -----------------------------------------------------------------------------
+static const uint8_t PROGMEM miniFont3x5[43][5] = {
+    {0x2, 0x5, 0x7, 0x5, 0x5}, // A (0)
+    {0x6, 0x5, 0x6, 0x5, 0x6}, // B (1)
+    {0x3, 0x4, 0x4, 0x4, 0x3}, // C (2)
+    {0x6, 0x5, 0x5, 0x5, 0x6}, // D (3)
+    {0x7, 0x4, 0x6, 0x4, 0x7}, // E (4)
+    {0x7, 0x4, 0x6, 0x4, 0x4}, // F (5)
+    {0x3, 0x4, 0x5, 0x5, 0x3}, // G (6)
+    {0x5, 0x5, 0x7, 0x5, 0x5}, // H (7)
+    {0x7, 0x2, 0x2, 0x2, 0x7}, // I (8)
+    {0x1, 0x1, 0x1, 0x5, 0x2}, // J (9)
+    {0x5, 0x6, 0x4, 0x6, 0x5}, // K (10)
+    {0x4, 0x4, 0x4, 0x4, 0x7}, // L (11)
+    {0x5, 0x7, 0x5, 0x5, 0x5}, // M (12)
+    {0x6, 0x5, 0x5, 0x5, 0x5}, // N (13)
+    {0x2, 0x5, 0x5, 0x5, 0x2}, // O (14)
+    {0x6, 0x5, 0x6, 0x4, 0x4}, // P (15)
+    {0x2, 0x5, 0x5, 0x3, 0x1}, // Q (16)
+    {0x6, 0x5, 0x6, 0x5, 0x5}, // R (17)
+    {0x3, 0x4, 0x2, 0x1, 0x6}, // S (18)
+    {0x7, 0x2, 0x2, 0x2, 0x2}, // T (19)
+    {0x5, 0x5, 0x5, 0x5, 0x2}, // U (20)
+    {0x5, 0x5, 0x5, 0x5, 0x2}, // V (21)
+    {0x5, 0x5, 0x5, 0x7, 0x5}, // W (22)
+    {0x5, 0x5, 0x2, 0x5, 0x5}, // X (23)
+    {0x5, 0x5, 0x2, 0x2, 0x2}, // Y (24)
+    {0x7, 0x1, 0x2, 0x4, 0x7}, // Z (25)
+    {0x2, 0x5, 0x5, 0x5, 0x2}, // 0 (26)
+    {0x2, 0x6, 0x2, 0x2, 0x7}, // 1 (27)
+    {0x6, 0x1, 0x2, 0x4, 0x7}, // 2 (28)
+    {0x6, 0x1, 0x2, 0x1, 0x6}, // 3 (29)
+    {0x5, 0x5, 0x7, 0x1, 0x1}, // 4 (30)
+    {0x7, 0x4, 0x6, 0x1, 0x6}, // 5 (31)
+    {0x3, 0x4, 0x6, 0x5, 0x2}, // 6 (32)
+    {0x7, 0x1, 0x2, 0x2, 0x2}, // 7 (33)
+    {0x2, 0x5, 0x2, 0x5, 0x2}, // 8 (34)
+    {0x2, 0x5, 0x3, 0x1, 0x6}, // 9 (35)
+    {0x0, 0x2, 0x0, 0x2, 0x0}, // : (36)
+    {0x1, 0x1, 0x2, 0x4, 0x4}, // / (37)
+    {0x0, 0x0, 0x7, 0x0, 0x0}, // - (38)
+    {0x6, 0x4, 0x4, 0x4, 0x6}, // [ (39)
+    {0x3, 0x1, 0x1, 0x1, 0x3}, // ] (40)
+    {0x0, 0x0, 0x0, 0x0, 0x2}, // . (41)
+    {0x0, 0x0, 0x0, 0x0, 0x0}  // space (42)
+};
+
+static inline int8_t getMiniGlyphIndex(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a';
+    if (c >= '0' && c <= '9') return 26 + (c - '0');
+    if (c == ':') return 36;
+    if (c == '/') return 37;
+    if (c == '-') return 38;
+    if (c == '[') return 39;
+    if (c == ']') return 40;
+    if (c == '.') return 41;
+    if (c == ' ') return 42;
+    return -1;
+}
+
+static inline uint8_t getMiniCharWidth(char c) {
+    if (c == ':' || c == '.') return 2;
+    if (c == ' ') return 2;
+    if (c == '[' || c == ']') return 3;
+    return 4; // 3px de glifo + 1px de espaciado garantizado para todas las letras A-Z (incluida la 'I') y dígitos
+}
+
+static inline void drawMiniChar(int16_t x, int16_t y, char c, uint8_t color = WHITE) {
+    int8_t idx = getMiniGlyphIndex(c);
+    if (idx < 0 || idx == 42) return;
+    for (int8_t r = 0; r < 5; r++) {
+        uint8_t row = pgm_read_byte(&miniFont3x5[idx][r]);
+        if (row & 0x04) arduboy.drawPixel(x, y + r, color);
+        if (row & 0x02) arduboy.drawPixel(x + 1, y + r, color);
+        if (row & 0x01) arduboy.drawPixel(x + 2, y + r, color);
+    }
+}
+
+static inline void drawMiniText(int16_t x, int16_t y, const char* str, uint8_t color = WHITE) {
+    int16_t cx = x;
+    while (*str) {
+        char c = *str++;
+        drawMiniChar(cx, y, c, color);
+        cx += getMiniCharWidth(c);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// BANCO DE PALABRAS Y MATRICES (11 COLS x 6 FILAS) EN PROGMEM
+// -----------------------------------------------------------------------------
+static const SopaTheme PROGMEM SOPA_THEMES[TOTAL_SOPA_THEMES] = {
+    // Tema 0: ANIMALES (Palabras del diccionario del Ahorcado)
+    {
+        "ANIMALES",
+        {
+            "PERROLFLYPD",
+            "TJYCQVMOFPJ",
+            "GATOSSJBYUH",
+            "YXGQZGQOKMD",
+            "XLEONZXMQAG",
+            "HLGPCKSJHYH"
+        },
+        5,
+        {
+            {"PERRO", 0, 0, 4, 0, false},
+            {"GATO",  0, 2, 3, 2, false},
+            {"LEON",  1, 4, 4, 4, false},
+            {"LOBO",  7, 0, 7, 3, false},
+            {"PUMA",  9, 1, 9, 4, false}
+        }
+    },
+    // Tema 1: HOGAR (Palabras del diccionario del Ahorcado)
+    {
+        "HOGAR",
+        {
+            "MESAPMKLYCB",
+            "RJVFYGWLTLD",
+            "SILLAPQAHIN",
+            "BCRWZZNVWBC",
+            "ZRELOJTEDRK",
+            "WKNQQTSJROL"
+        },
+        5,
+        {
+            {"MESA",  0, 0, 3, 0, false},
+            {"SILLA", 0, 2, 4, 2, false},
+            {"RELOJ", 1, 4, 5, 4, false},
+            {"LLAVE", 7, 0, 7, 4, false},
+            {"LIBRO", 9, 1, 9, 5, false}
+        }
+    },
+    // Tema 2: COMIDA (Palabras del diccionario del Ahorcado)
+    {
+        "COMIDA",
+        {
+            "QUESOYFLBNB",
+            "KTQHBQRIFLW",
+            "FRUTASMMCEW",
+            "MXLHCHDOPCC",
+            "PARROZZNJHJ",
+            "CGXTQWNYNET"
+        },
+        5,
+        {
+            {"QUESO", 0, 0, 4, 0, false},
+            {"FRUTA", 0, 2, 4, 2, false},
+            {"ARROZ", 1, 4, 5, 4, false},
+            {"LIMON", 7, 0, 7, 4, false},
+            {"LECHE", 9, 1, 9, 5, false}
+        }
+    },
+    // Tema 3: NATURALEZA (Palabras del diccionario del Ahorcado)
+    {
+        "NATURALEZA",
+        {
+            "PLAYACWCDNJ",
+            "SFTVXBBIXAP",
+            "FUEGODBEHRB",
+            "TWGWDHYLFBN",
+            "YMONTECOQOJ",
+            "SCZHKKNKGLL"
+        },
+        5,
+        {
+            {"PLAYA", 0, 0, 4, 0, false},
+            {"FUEGO", 0, 2, 4, 2, false},
+            {"MONTE", 1, 4, 5, 4, false},
+            {"CIELO", 7, 0, 7, 4, false},
+            {"ARBOL", 9, 1, 9, 5, false}
+        }
+    },
+    // Tema 4: TRANSPORTE (Palabras del diccionario del Ahorcado)
+    {
+        "TRANSPORTE",
+        {
+            "BARCOPCMLZJ",
+            "HXZDFNFEWTH",
+            "AVIONGXTGRM",
+            "WBMWQPHRGEB",
+            "TCOCHEXOJNT",
+            "KSJBWNXYZGJ"
+        },
+        5,
+        {
+            {"BARCO", 0, 0, 4, 0, false},
+            {"AVION", 0, 2, 4, 2, false},
+            {"COCHE", 1, 4, 5, 4, false},
+            {"METRO", 7, 0, 7, 4, false},
+            {"TREN",  9, 1, 9, 4, false}
+        }
+    },
+    // Tema 5: CIUDAD (Palabras del diccionario del Ahorcado)
+    {
+        "CIUDAD",
+        {
+            "HOTELHNPPDJ",
+            "FMSVWNCLYBZ",
+            "TORREQMAMAN",
+            "SPPDLKMZTNP",
+            "BFAROPSAZCK",
+            "VVNNGNDMCOQ"
+        },
+        5,
+        {
+            {"HOTEL", 0, 0, 4, 0, false},
+            {"TORRE", 0, 2, 4, 2, false},
+            {"FARO",  1, 4, 4, 4, false},
+            {"PLAZA", 7, 0, 7, 4, false},
+            {"BANCO", 9, 1, 9, 5, false}
+        }
+    },
+    // Tema 6: COLORES (Palabras del diccionario del Ahorcado)
+    {
+        "COLORES",
+        {
+            "VERDEGRAQXQ",
+            "GFKFHSWZYRQ",
+            "NEGROHTUJOB",
+            "TBVZSJZLGJM",
+            "PROSAKRBMOV",
+            "NPHGTHBWWBN"
+        },
+        5,
+        {
+            {"VERDE", 0, 0, 4, 0, false},
+            {"NEGRO", 0, 2, 4, 2, false},
+            {"ROSA",  1, 4, 4, 4, false},
+            {"AZUL",  7, 0, 7, 3, false},
+            {"ROJO",  9, 1, 9, 4, false}
+        }
+    },
+    // Tema 7: EMOCIONES (Palabras del diccionario del Ahorcado)
+    {
+        "EMOCIONES",
+        {
+            "VALORQDCDGZ",
+            "HMNDJQYAJVQ",
+            "MENTEHTLJIM",
+            "LYQYGNKOVAN",
+            "QAMORNGRPJK",
+            "GDPQGJNDZEX"
+        },
+        5,
+        {
+            {"VALOR", 0, 0, 4, 0, false},
+            {"MENTE", 0, 2, 4, 2, false},
+            {"AMOR",  1, 4, 4, 4, false},
+            {"CALOR", 7, 0, 7, 4, false},
+            {"VIAJE", 9, 1, 9, 5, false}
+        }
+    }
+};
+
+class WordSearchGame {
+public:
+    SopaState state;
+    bool exitRequested;
+    bool gameOver;
+    bool victory;
+
+    int8_t cursorCol; // 0..10
+    int8_t cursorRow; // 0..5
+    bool isSelecting;
+    int8_t startCol;
+    int8_t startRow;
+
+    uint8_t currentThemeIdx;
+    char currentGrid[6][14];
+    SopaWord activeWords[5];
+    uint8_t activeWordCount;
+    uint8_t foundCount;
+
+    uint32_t score;
+    uint32_t highScore;
+
+    void init();
+    void loadTheme(uint8_t themeIdx);
+    void update();
+    void draw();
+    void saveHighScore();
+    void loadHighScore();
+
+private:
+    void drawCornerBrackets(int16_t cx, int16_t cy);
+    void drawFoundBox(int8_t sc, int8_t sr, int8_t ec, int8_t er);
+    void validateSelection();
+    bool isReverseMatch(const char* s1, const char* s2);
+};

@@ -53,6 +53,18 @@ public:
         Arduboy2Core::setContrast(contrast);
     }
 
+    float getBatteryVoltage() {
+        return Arduboy2Core::getBatteryVoltage();
+    }
+
+    uint32_t getBatteryRawMilliVolts() {
+        return Arduboy2Core::getBatteryRawMilliVolts();
+    }
+
+    int getBatteryPercentage() {
+        return Arduboy2Core::getBatteryPercentage();
+    }
+
     void delayShort(uint16_t ms) {
         delay(ms);
     }
