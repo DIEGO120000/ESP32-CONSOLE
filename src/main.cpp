@@ -30,17 +30,7 @@ const char* const volumeLabels[] = {"MUTE", "BAJO", "MEDIO", "ALTO"};
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
 
-// =============================================================================
-// HARDWARE HOUR METER & NVS USAGE TELEMETRY (NVS "sys_stats")
-// =============================================================================
-Preferences preferences;
-uint32_t totalPlaySeconds = 0;
-uint32_t sessionSeconds = 0;
-static uint32_t lastPlayTimeTickMs = 0;
-static uint32_t lastNvsSaveSeconds = 0;
-static uint32_t resetHoldStartTime = 0;
-static bool resetTriggered = false;
-static uint32_t resetFeedbackUntil = 0;
+
 
 // =============================================================================
 // SYSTEM CONFIGURATION & HARDWARE PERSISTENCE (NVS "sys_cfg")
@@ -6831,8 +6821,6 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
     } else if (currentState == STATE_SOPA) {
         wordSearchGame.saveHighScore();
     }
-    // Guardar cuentahoras en NVS ("sys_stats") antes de apagar
-    preferences.putUInt("play_time", totalPlaySeconds);
     melodyPlayer.stop();
     arduboy.clear();
     arduboy.fillRect(10, 18, 108, 28, BLACK);
@@ -6938,13 +6926,6 @@ void setup() {
     // Cargar y aplicar brillo de pantalla y volumen desde NVS ("sys_cfg")
     loadSystemSettings();
 
-    // Inicializar cuentahoras persistente en NVS ("sys_stats")
-    preferences.begin("sys_stats", false);
-    totalPlaySeconds = preferences.getUInt("play_time", 0);
-    lastNvsSaveSeconds = totalPlaySeconds;
-    lastPlayTimeTickMs = millis();
-    sessionSeconds = 0;
-
     // Estabilización y purga de transitorios de arranque en botones
     delay(100);
     for (uint8_t i = 0; i < 5; i++) {
@@ -7037,7 +7018,7 @@ void drawSettingsScreen() {
     arduboy.setTextColor(WHITE);
 
     // Item 0: Brillo Pantalla (10% a 100%)
-    int16_t y0 = 10;
+    int16_t y0 = 12;
     if (settingsCursor == 0) {
         arduboy.fillRect(2, y0 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
@@ -7047,7 +7028,7 @@ void drawSettingsScreen() {
     arduboy.setTextColor(WHITE);
 
     // Item 1: Volumen / Audio
-    int16_t y1 = 19;
+    int16_t y1 = 22;
     if (settingsCursor == 1) {
         arduboy.fillRect(2, y1 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
@@ -7057,7 +7038,7 @@ void drawSettingsScreen() {
     arduboy.setTextColor(WHITE);
 
     // Item 2: Batería (Lectura ADC en GPIO 2 - Voltaje y Porcentaje Li-Ion estabilizado)
-    int16_t y2 = 28;
+    int16_t y2 = 32;
     float vBat = getBatteryVoltage();
     int batPct = getBatteryPercentage();
 
@@ -7078,77 +7059,26 @@ void drawSettingsScreen() {
     arduboy.print(batStr);
     arduboy.setTextColor(WHITE);
 
-    // Item 3: Tiempo de Uso (Cuentahoras acumulado persistente NVS)
-    int16_t y3 = 37;
+    // Item 3: Salir / Guardar
+    int16_t y3 = 43;
     if (settingsCursor == 3) {
         arduboy.fillRect(2, y3 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
-    } else {
-        arduboy.setTextColor(WHITE);
-    }
-
-    if (millis() < resetFeedbackUntil) {
         arduboy.setCursor(10, y3);
-        arduboy.print("!RESETEADO A CERO!");
-    } else if (settingsCursor == 3 && resetHoldStartTime > 0 && !resetTriggered) {
-        uint32_t holdMs = millis() - resetHoldStartTime;
-        if (holdMs > 2000) holdMs = 2000;
-        int pct = (int)((holdMs * 100) / 2000);
-        char holdStr[24];
-        snprintf(holdStr, sizeof(holdStr), "RESET: [ %3d%% ]", pct);
-        int16_t xH = (128 - ((int16_t)strlen(holdStr) * 6)) / 2;
-        if (xH < 2) xH = 2;
-        arduboy.setCursor(xH, y3);
-        arduboy.print(holdStr);
-    } else {
-        uint32_t hrs = totalPlaySeconds / 3600;
-        uint32_t mins = (totalPlaySeconds % 3600) / 60;
-        uint32_t secs = totalPlaySeconds % 60;
-        char useStr[24];
-        if (hrs < 100) {
-            snprintf(useStr, sizeof(useStr), "USO: %02uh %02um %02us", (unsigned int)hrs, (unsigned int)mins, (unsigned int)secs);
-        } else {
-            snprintf(useStr, sizeof(useStr), "USO: %luh %02um", (unsigned long)hrs, (unsigned int)mins);
-        }
-        int16_t strLenUse = (int16_t)strlen(useStr);
-        int16_t xUse = (128 - (strLenUse * 6)) / 2;
-        if (xUse < 2) xUse = 2;
-        arduboy.setCursor(xUse, y3);
-        arduboy.print(useStr);
-    }
-    arduboy.setTextColor(WHITE);
-
-    // Item 4: Salir / Guardar
-    int16_t y4 = 46;
-    if (settingsCursor == 4) {
-        arduboy.fillRect(2, y4 - 1, 124, 9, WHITE);
-        arduboy.setTextColor(BLACK);
-        arduboy.setCursor(10, y4);
         arduboy.print("> GUARDAR Y SALIR <");
         arduboy.setTextColor(WHITE);
     } else {
-        arduboy.setCursor(12, y4);
+        arduboy.setCursor(12, y3);
         arduboy.print("[ GUARDAR Y SALIR ]");
     }
 
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    if (settingsCursor == 3) {
-        arduboy.print("MANTEN A:RESET | R:MENU");
-    } else {
-        arduboy.print("B:- A:+ | RIGHT:MENU");
-    }
+    arduboy.print("B:- A:+ | RIGHT:MENU");
 }
 
 void transitionMenuToSettings() {
-    // REGLA DE SEGURIDAD NVS: Guardar cuentahoras al transicionar a Ajustes
-    preferences.putUInt("play_time", totalPlaySeconds);
-    lastNvsSaveSeconds = totalPlaySeconds;
-    resetHoldStartTime = 0;
-    resetTriggered = false;
-    resetFeedbackUntil = 0;
-
     sound.tone(1100, 25);
 
     // 1. Capturar pantalla de Menú
@@ -7185,13 +7115,6 @@ void transitionMenuToSettings() {
 
 void transitionSettingsToMenu() {
     saveSystemSettings();
-    // Guardar cuentahoras al regresar al Menú Principal
-    preferences.putUInt("play_time", totalPlaySeconds);
-    lastNvsSaveSeconds = totalPlaySeconds;
-    resetHoldStartTime = 0;
-    resetTriggered = false;
-    resetFeedbackUntil = 0;
-
     sound.tone(880, 25);
 
     // 1. Capturar pantalla de Ajustes
@@ -7247,21 +7170,7 @@ void loop() {
     sound.update();
     melodyPlayer.update();
 
-    // -------------------------------------------------------------------------
-    // CUENTAHORAS / CRONÓMETRO DE USO EN NVS ("sys_stats")
-    // -------------------------------------------------------------------------
-    uint32_t nowTimeMs = millis();
-    if (nowTimeMs - lastPlayTimeTickMs >= 1000) {
-        lastPlayTimeTickMs = nowTimeMs;
-        totalPlaySeconds++;
-        sessionSeconds++;
 
-        // Regla de seguridad NVS Flash: guardar únicamente cada 60 segundos
-        if (totalPlaySeconds - lastNvsSaveSeconds >= 60) {
-            lastNvsSaveSeconds = totalPlaySeconds;
-            preferences.putUInt("play_time", totalPlaySeconds);
-        }
-    }
 
     // -------------------------------------------------------------------------
     // STANDBY POR SOFTWARE / SCREEN BLANKING (WAKEUP INMEDIATO SIN BUG I2C)
@@ -7702,45 +7611,16 @@ void loop() {
                 break;
             }
 
-            // Navegación Vertical entre opciones con UP y DOWN (5 elementos en carrusel)
+            // Navegación Vertical entre opciones con UP y DOWN (4 elementos en carrusel)
             if (arduboy.justPressed(UP_BUTTON)) {
                 sound.tone(880, 15);
                 settingsCursor--;
-                if (settingsCursor < 0) settingsCursor = 4;
-                resetHoldStartTime = 0;
-                resetTriggered = false;
+                if (settingsCursor < 0) settingsCursor = 3;
             }
             if (arduboy.justPressed(DOWN_BUTTON)) {
                 sound.tone(700, 15);
                 settingsCursor++;
-                if (settingsCursor > 4) settingsCursor = 0;
-                resetHoldStartTime = 0;
-                resetTriggered = false;
-            }
-
-            // GESTIÓN DE RESET POR PULSACIÓN SOSTENIDA DE 2 SEGUNDOS EN "TIEMPO USO" (Item 3)
-            if (settingsCursor == 3) {
-                if (arduboy.pressed(A_BUTTON)) {
-                    if (resetHoldStartTime == 0) {
-                        resetHoldStartTime = millis();
-                    } else if (!resetTriggered && (millis() - resetHoldStartTime >= 2000)) {
-                        totalPlaySeconds = 0;
-                        sessionSeconds = 0;
-                        lastNvsSaveSeconds = 0;
-                        preferences.putUInt("play_time", 0);
-                        resetTriggered = true;
-                        resetFeedbackUntil = millis() + 1500;
-                        sound.tone(1400, 60);
-                        delay(70);
-                        sound.tone(1800, 100);
-                    }
-                } else {
-                    resetHoldStartTime = 0;
-                    resetTriggered = false;
-                }
-            } else {
-                resetHoldStartTime = 0;
-                resetTriggered = false;
+                if (settingsCursor > 3) settingsCursor = 0;
             }
 
             // DISMINUIR con Botón B (GPIO 4) o cruceta LEFT
@@ -7785,9 +7665,6 @@ void loop() {
                 } else if (settingsCursor == 2) {
                     sound.tone(900, 20);
                 } else if (settingsCursor == 3) {
-                    // Item 3 utiliza pulsación sostenida (hold >= 2s) para reiniciar
-                    sound.tone(900, 20);
-                } else if (settingsCursor == 4) {
                     transitionSettingsToMenu();
                     break;
                 }

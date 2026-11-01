@@ -3,32 +3,31 @@
 #include <Preferences.h>
 #include "Arduboy2.h"
 #include "ArduboyTones.h"
+#include "hangman_words.h"
 
 extern Arduboy2 arduboy;
 extern ArduboyTones sound;
 
 enum SopaState : uint8_t {
-    SOPA_STATE_PLAYING = 0,
+    SOPA_STATE_DIFFICULTY = 0,
+    SOPA_STATE_PLAYING,
     SOPA_STATE_VICTORY
 };
 
+enum SopaDifficulty : uint8_t {
+    SOPA_DIFF_FACIL = 0,
+    SOPA_DIFF_MEDIO,
+    SOPA_DIFF_DIFICIL
+};
+
 struct SopaWord {
-    const char* text;
+    char text[10];
     int8_t startC;
     int8_t startR;
     int8_t endC;
     int8_t endR;
     bool found;
 };
-
-struct SopaTheme {
-    const char* name;
-    const char grid[6][14];
-    uint8_t wordCount;
-    SopaWord words[5];
-};
-
-static const uint8_t TOTAL_SOPA_THEMES = 8;
 
 // -----------------------------------------------------------------------------
 // FUENTE RETRO 5x5 PARA LA MATRIZ DE LETRAS (ESPACIADO GRANDE Y SIMÉTRICO)
@@ -166,175 +165,12 @@ static inline void drawMiniText(int16_t x, int16_t y, const char* str, uint8_t c
     }
 }
 
-// -----------------------------------------------------------------------------
-// BANCO DE PALABRAS Y MATRICES (11 COLS x 6 FILAS) EN PROGMEM
-// -----------------------------------------------------------------------------
-static const SopaTheme PROGMEM SOPA_THEMES[TOTAL_SOPA_THEMES] = {
-    // Tema 0: ANIMALES (Palabras del diccionario del Ahorcado)
-    {
-        "ANIMALES",
-        {
-            "PERROLFLYPD",
-            "TJYCQVMOFPJ",
-            "GATOSSJBYUH",
-            "YXGQZGQOKMD",
-            "XLEONZXMQAG",
-            "HLGPCKSJHYH"
-        },
-        5,
-        {
-            {"PERRO", 0, 0, 4, 0, false},
-            {"GATO",  0, 2, 3, 2, false},
-            {"LEON",  1, 4, 4, 4, false},
-            {"LOBO",  7, 0, 7, 3, false},
-            {"PUMA",  9, 1, 9, 4, false}
-        }
-    },
-    // Tema 1: HOGAR (Palabras del diccionario del Ahorcado)
-    {
-        "HOGAR",
-        {
-            "MESAPMKLYCB",
-            "RJVFYGWLTLD",
-            "SILLAPQAHIN",
-            "BCRWZZNVWBC",
-            "ZRELOJTEDRK",
-            "WKNQQTSJROL"
-        },
-        5,
-        {
-            {"MESA",  0, 0, 3, 0, false},
-            {"SILLA", 0, 2, 4, 2, false},
-            {"RELOJ", 1, 4, 5, 4, false},
-            {"LLAVE", 7, 0, 7, 4, false},
-            {"LIBRO", 9, 1, 9, 5, false}
-        }
-    },
-    // Tema 2: COMIDA (Palabras del diccionario del Ahorcado)
-    {
-        "COMIDA",
-        {
-            "QUESOYFLBNB",
-            "KTQHBQRIFLW",
-            "FRUTASMMCEW",
-            "MXLHCHDOPCC",
-            "PARROZZNJHJ",
-            "CGXTQWNYNET"
-        },
-        5,
-        {
-            {"QUESO", 0, 0, 4, 0, false},
-            {"FRUTA", 0, 2, 4, 2, false},
-            {"ARROZ", 1, 4, 5, 4, false},
-            {"LIMON", 7, 0, 7, 4, false},
-            {"LECHE", 9, 1, 9, 5, false}
-        }
-    },
-    // Tema 3: NATURALEZA (Palabras del diccionario del Ahorcado)
-    {
-        "NATURALEZA",
-        {
-            "PLAYACWCDNJ",
-            "SFTVXBBIXAP",
-            "FUEGODBEHRB",
-            "TWGWDHYLFBN",
-            "YMONTECOQOJ",
-            "SCZHKKNKGLL"
-        },
-        5,
-        {
-            {"PLAYA", 0, 0, 4, 0, false},
-            {"FUEGO", 0, 2, 4, 2, false},
-            {"MONTE", 1, 4, 5, 4, false},
-            {"CIELO", 7, 0, 7, 4, false},
-            {"ARBOL", 9, 1, 9, 5, false}
-        }
-    },
-    // Tema 4: TRANSPORTE (Palabras del diccionario del Ahorcado)
-    {
-        "TRANSPORTE",
-        {
-            "BARCOPCMLZJ",
-            "HXZDFNFEWTH",
-            "AVIONGXTGRM",
-            "WBMWQPHRGEB",
-            "TCOCHEXOJNT",
-            "KSJBWNXYZGJ"
-        },
-        5,
-        {
-            {"BARCO", 0, 0, 4, 0, false},
-            {"AVION", 0, 2, 4, 2, false},
-            {"COCHE", 1, 4, 5, 4, false},
-            {"METRO", 7, 0, 7, 4, false},
-            {"TREN",  9, 1, 9, 4, false}
-        }
-    },
-    // Tema 5: CIUDAD (Palabras del diccionario del Ahorcado)
-    {
-        "CIUDAD",
-        {
-            "HOTELHNPPDJ",
-            "FMSVWNCLYBZ",
-            "TORREQMAMAN",
-            "SPPDLKMZTNP",
-            "BFAROPSAZCK",
-            "VVNNGNDMCOQ"
-        },
-        5,
-        {
-            {"HOTEL", 0, 0, 4, 0, false},
-            {"TORRE", 0, 2, 4, 2, false},
-            {"FARO",  1, 4, 4, 4, false},
-            {"PLAZA", 7, 0, 7, 4, false},
-            {"BANCO", 9, 1, 9, 5, false}
-        }
-    },
-    // Tema 6: COLORES (Palabras del diccionario del Ahorcado)
-    {
-        "COLORES",
-        {
-            "VERDEGRAQXQ",
-            "GFKFHSWZYRQ",
-            "NEGROHTUJOB",
-            "TBVZSJZLGJM",
-            "PROSAKRBMOV",
-            "NPHGTHBWWBN"
-        },
-        5,
-        {
-            {"VERDE", 0, 0, 4, 0, false},
-            {"NEGRO", 0, 2, 4, 2, false},
-            {"ROSA",  1, 4, 4, 4, false},
-            {"AZUL",  7, 0, 7, 3, false},
-            {"ROJO",  9, 1, 9, 4, false}
-        }
-    },
-    // Tema 7: EMOCIONES (Palabras del diccionario del Ahorcado)
-    {
-        "EMOCIONES",
-        {
-            "VALORQDCDGZ",
-            "HMNDJQYAJVQ",
-            "MENTEHTLJIM",
-            "LYQYGNKOVAN",
-            "QAMORNGRPJK",
-            "GDPQGJNDZEX"
-        },
-        5,
-        {
-            {"VALOR", 0, 0, 4, 0, false},
-            {"MENTE", 0, 2, 4, 2, false},
-            {"AMOR",  1, 4, 4, 4, false},
-            {"CALOR", 7, 0, 7, 4, false},
-            {"VIAJE", 9, 1, 9, 5, false}
-        }
-    }
-};
-
 class WordSearchGame {
 public:
     SopaState state;
+    SopaDifficulty currentDifficulty;
+    uint8_t difficultyCursor;
+
     bool exitRequested;
     bool gameOver;
     bool victory;
@@ -345,7 +181,6 @@ public:
     int8_t startCol;
     int8_t startRow;
 
-    uint8_t currentThemeIdx;
     char currentGrid[6][14];
     SopaWord activeWords[5];
     uint8_t activeWordCount;
@@ -355,9 +190,10 @@ public:
     uint32_t highScore;
 
     void init();
-    void loadTheme(uint8_t themeIdx);
+    void generateRandomPuzzle();
     void update();
     void draw();
+    void drawDifficultyScreen();
     void saveHighScore();
     void loadHighScore();
 

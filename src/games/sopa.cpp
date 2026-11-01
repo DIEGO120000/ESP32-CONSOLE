@@ -1,54 +1,301 @@
 #include "WordSearchGame.h"
 
 // =============================================================================
-// JUEGO: SOPA DE LETRAS - ESTÉTICA 1:1 CON FOTO DE REFERENCIA
-// Matriz con espaciado amplio de 8x8 px por celda (3 px de separación limpia)
+// JUEGO: SOPA DE LETRAS DINÁMICA Y ALEATORIA (DICCIONARIO HANGMAN ESPAÑOL)
+// Matriz de 11x6 con palabras de longitud variable (4 a 8 caracteres)
+// Colocaciones en 8 direcciones: Horizontal, Vertical, Diagonal y Reversas
 // =============================================================================
+
+static const int8_t DIRECTIONS[8][2] = {
+    {1, 0},   // Horizontal derecha
+    {-1, 0},  // Horizontal izquierda (reversa)
+    {0, 1},   // Vertical abajo
+    {0, -1},  // Vertical arriba (reversa)
+    {1, 1},   // Diagonal abajo-derecha
+    {-1, -1}, // Diagonal arriba-izquierda (reversa)
+    {1, -1},  // Diagonal arriba-derecha
+    {-1, 1}   // Diagonal abajo-izquierda
+};
+
+static bool canPlaceWord(const char grid[6][14], const char* word, int8_t sc, int8_t sr, int8_t dc, int8_t dr) {
+    uint8_t len = strlen(word);
+    int8_t ec = sc + (len - 1) * dc;
+    int8_t er = sr + (len - 1) * dr;
+    if (ec < 0 || ec >= 11 || er < 0 || er >= 6) return false;
+    for (uint8_t i = 0; i < len; i++) {
+        char ch = grid[sr + i * dr][sc + i * dc];
+        if (ch != '\0' && ch != word[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void placeWord(char grid[6][14], const char* word, int8_t sc, int8_t sr, int8_t dc, int8_t dr) {
+    uint8_t len = strlen(word);
+    for (uint8_t i = 0; i < len; i++) {
+        grid[sr + i * dr][sc + i * dc] = word[i];
+    }
+}
 
 void WordSearchGame::init() {
     loadHighScore();
     score = 0;
-    currentThemeIdx = 0;
     exitRequested = false;
     gameOver = false;
     victory = false;
-    loadTheme(currentThemeIdx);
+    difficultyCursor = 0;
+    currentDifficulty = SOPA_DIFF_FACIL;
+    state = SOPA_STATE_DIFFICULTY;
 }
 
-void WordSearchGame::loadTheme(uint8_t themeIdx) {
-    currentThemeIdx = themeIdx % TOTAL_SOPA_THEMES;
+void WordSearchGame::drawDifficultyScreen() {
+    arduboy.clear();
+    // Marco exterior con esquinas redondeadas
+    arduboy.drawRoundRect(14, 6, 100, 52, 3, WHITE);
+
+    // Título [ DIFICULTAD ]
+    arduboy.setTextColor(WHITE);
+    arduboy.setCursor(26, 10);
+    arduboy.print("[ DIFICULTAD ]");
+    arduboy.drawFastHLine(20, 20, 88, WHITE);
+
+    // Opciones FÁCIL, MEDIO, DIFÍCIL
+    const char* diffNames[3] = {"FACIL", "MEDIO", "DIFICIL"};
+    for (uint8_t i = 0; i < 3; i++) {
+        int16_t y = 24 + i * 9;
+        if (difficultyCursor == i) {
+            arduboy.fillRect(22, y - 1, 84, 9, WHITE);
+            arduboy.setTextColor(BLACK);
+            arduboy.setCursor(28, y);
+            arduboy.print("> ");
+            arduboy.print(diffNames[i]);
+            arduboy.setTextColor(WHITE);
+        } else {
+            arduboy.setTextColor(WHITE);
+            arduboy.setCursor(34, y);
+            arduboy.print(diffNames[i]);
+        }
+    }
+
+    // Pie de controles
+    arduboy.setCursor(22, 51);
+    arduboy.print("A:Selec  B:Salir");
+}
+
+void WordSearchGame::generateRandomPuzzle() {
+    randomSeed(analogRead(1) ^ millis() ^ esp_random());
     state = SOPA_STATE_PLAYING;
     cursorCol = 0;
     cursorRow = 0;
     isSelecting = false;
     foundCount = 0;
     victory = false;
+    activeWordCount = 5;
 
-    // Copiar cuadrícula (6 filas x 11 columnas)
-    for (uint8_t r = 0; r < 6; r++) {
-        memcpy_P(currentGrid[r], SOPA_THEMES[currentThemeIdx].grid[r], 11);
-        currentGrid[r][11] = '\0';
+    // Parámetros por nivel de dificultad según requisitos:
+    // FÁCIL:
+    //   - Direcciones: Solo Horizontal (->) y Vertical (v) [dx >= 0, dy >= 0]
+    //   - Banco de palabras: Términos de 3 a 5 letras
+    //   - Letras invertidas: Desactivadas
+    // MEDIO:
+    //   - Direcciones: Horizontal (->), Vertical (v) y Diagonal descendente (\)
+    //   - Banco de palabras: Términos de 4 a 6 letras
+    //   - Letras invertidas: Desactivadas
+    // DIFÍCIL:
+    //   - Direcciones: 8 direcciones posibles (permitiendo palabras en reversa)
+    //   - Banco de palabras: Términos de 5 a 7 letras
+    uint8_t minLen = 3;
+    uint8_t maxLen = 5;
+    uint8_t numDirs = 2;
+    int8_t activeDirs[8][2];
+
+    if (currentDifficulty == SOPA_DIFF_FACIL) {
+        minLen = 3;
+        maxLen = 5;
+        numDirs = 2;
+        activeDirs[0][0] = 1; activeDirs[0][1] = 0; // Horizontal ->
+        activeDirs[1][0] = 0; activeDirs[1][1] = 1; // Vertical v
+    } else if (currentDifficulty == SOPA_DIFF_MEDIO) {
+        minLen = 4;
+        maxLen = 6;
+        numDirs = 3;
+        activeDirs[0][0] = 1; activeDirs[0][1] = 0; // Horizontal ->
+        activeDirs[1][0] = 0; activeDirs[1][1] = 1; // Vertical v
+        activeDirs[2][0] = 1; activeDirs[2][1] = 1; // Diagonal descendente \ (dx=1, dy=1)
+    } else { // SOPA_DIFF_DIFICIL
+        minLen = 5;
+        maxLen = 7;
+        numDirs = 8;
+        for (uint8_t d = 0; d < 8; d++) {
+            activeDirs[d][0] = DIRECTIONS[d][0];
+            activeDirs[d][1] = DIRECTIONS[d][1];
+        }
     }
 
-    // Cargar palabras activas
-    activeWordCount = pgm_read_byte(&SOPA_THEMES[currentThemeIdx].wordCount);
-    if (activeWordCount > 5) activeWordCount = 5;
-    for (uint8_t i = 0; i < activeWordCount; i++) {
-        activeWords[i].text = (const char*)pgm_read_ptr(&SOPA_THEMES[currentThemeIdx].words[i].text);
-        activeWords[i].startC = (int8_t)pgm_read_byte(&SOPA_THEMES[currentThemeIdx].words[i].startC);
-        activeWords[i].startR = (int8_t)pgm_read_byte(&SOPA_THEMES[currentThemeIdx].words[i].startR);
-        activeWords[i].endC = (int8_t)pgm_read_byte(&SOPA_THEMES[currentThemeIdx].words[i].endC);
-        activeWords[i].endR = (int8_t)pgm_read_byte(&SOPA_THEMES[currentThemeIdx].words[i].endR);
-        activeWords[i].found = false;
+    char candidatePool[5][10];
+
+    for (uint8_t masterAttempt = 0; masterAttempt < 30; masterAttempt++) {
+        for (uint8_t wIdx = 0; wIdx < 5; wIdx++) {
+            bool unique = false;
+            for (uint16_t tr = 0; tr < 300; tr++) {
+                uint16_t randIdx = random(WORD_COUNT);
+                char temp[10];
+                for (uint8_t c = 0; c < 9; c++) {
+                    temp[c] = pgm_read_byte(&words_es[randIdx][c]);
+                    if (temp[c] == '\0') break;
+                }
+                temp[9] = '\0';
+                uint8_t len = strlen(temp);
+                if (len >= minLen && len <= maxLen) {
+                    bool duplicate = false;
+                    for (uint8_t prev = 0; prev < wIdx; prev++) {
+                        if (strcmp(candidatePool[prev], temp) == 0) {
+                            duplicate = true;
+                            break;
+                        }
+                    }
+                    if (!duplicate) {
+                        strcpy(candidatePool[wIdx], temp);
+                        unique = true;
+                        break;
+                    }
+                }
+            }
+            if (!unique) {
+                strcpy(candidatePool[wIdx], "GATO");
+            }
+        }
+
+        // Ordenar palabras de mayor a menor longitud para maximizar colocación
+        for (uint8_t i = 0; i < 4; i++) {
+            for (uint8_t j = i + 1; j < 5; j++) {
+                if (strlen(candidatePool[j]) > strlen(candidatePool[i])) {
+                    char swapBuf[10];
+                    strcpy(swapBuf, candidatePool[i]);
+                    strcpy(candidatePool[i], candidatePool[j]);
+                    strcpy(candidatePool[j], swapBuf);
+                }
+            }
+        }
+
+        char testGrid[6][14];
+        for (uint8_t r = 0; r < 6; r++) {
+            memset(testGrid[r], 0, sizeof(testGrid[r]));
+        }
+
+        struct Placement {
+            int8_t sc, sr, dc, dr;
+        } placements[5];
+
+        bool allPlaced = true;
+
+        for (uint8_t w = 0; w < 5; w++) {
+            const char* word = candidatePool[w];
+
+            // Pase 1: Contar opciones válidas
+            uint16_t validCount = 0;
+            for (int8_t sr = 0; sr < 6; sr++) {
+                for (int8_t sc = 0; sc < 11; sc++) {
+                    for (uint8_t d = 0; d < numDirs; d++) {
+                        if (canPlaceWord(testGrid, word, sc, sr, activeDirs[d][0], activeDirs[d][1])) {
+                            validCount++;
+                        }
+                    }
+                }
+            }
+
+            if (validCount == 0) {
+                allPlaced = false;
+                break;
+            }
+
+            // Pase 2: Seleccionar opción aleatoria uniforme
+            uint16_t chosenIdx = random(validCount);
+            uint16_t cur = 0;
+            bool placedCur = false;
+            for (int8_t sr = 0; sr < 6; sr++) {
+                for (int8_t sc = 0; sc < 11; sc++) {
+                    for (uint8_t d = 0; d < numDirs; d++) {
+                        if (canPlaceWord(testGrid, word, sc, sr, activeDirs[d][0], activeDirs[d][1])) {
+                            if (cur == chosenIdx) {
+                                placements[w] = {sc, sr, activeDirs[d][0], activeDirs[d][1]};
+                                placedCur = true;
+                                break;
+                            }
+                            cur++;
+                        }
+                    }
+                    if (placedCur) break;
+                }
+                if (placedCur) break;
+            }
+
+            placeWord(testGrid, word, placements[w].sc, placements[w].sr,
+                      placements[w].dc, placements[w].dr);
+        }
+
+        if (allPlaced) {
+            // Copiar matriz y rellenar celdas libres con letras aleatorias
+            for (uint8_t r = 0; r < 6; r++) {
+                for (uint8_t c = 0; c < 11; c++) {
+                    if (testGrid[r][c] != '\0') {
+                        currentGrid[r][c] = testGrid[r][c];
+                    } else {
+                        currentGrid[r][c] = 'A' + random(26);
+                    }
+                }
+                currentGrid[r][11] = '\0';
+            }
+
+            for (uint8_t w = 0; w < 5; w++) {
+                strcpy(activeWords[w].text, candidatePool[w]);
+                uint8_t len = strlen(candidatePool[w]);
+                activeWords[w].startC = placements[w].sc;
+                activeWords[w].startR = placements[w].sr;
+                activeWords[w].endC = placements[w].sc + (len - 1) * placements[w].dc;
+                activeWords[w].endR = placements[w].sr + (len - 1) * placements[w].dr;
+                activeWords[w].found = false;
+            }
+
+            return; // Cuadrícula completada exitosamente
+        }
     }
 }
 
 void WordSearchGame::update() {
+    if (state == SOPA_STATE_DIFFICULTY) {
+        if (arduboy.justPressed(UP_BUTTON)) {
+            if (difficultyCursor > 0) {
+                difficultyCursor--;
+                sound.tone(880, 15);
+            }
+        }
+        if (arduboy.justPressed(DOWN_BUTTON)) {
+            if (difficultyCursor < 2) {
+                difficultyCursor++;
+                sound.tone(700, 15);
+            }
+        }
+        if (arduboy.justPressed(A_BUTTON)) {
+            currentDifficulty = (SopaDifficulty)difficultyCursor;
+            sound.tone(1200, 30);
+            generateRandomPuzzle();
+            state = SOPA_STATE_PLAYING;
+        }
+        if (arduboy.justPressed(B_BUTTON)) {
+            sound.tone(450, 25);
+            exitRequested = true;
+        }
+        return;
+    }
+
     if (state == SOPA_STATE_VICTORY) {
         if (arduboy.justPressed(A_BUTTON)) {
             sound.tone(1400, 30);
-            loadTheme(currentThemeIdx + 1);
+            generateRandomPuzzle();
         } else if (arduboy.justPressed(B_BUTTON)) {
+            sound.tone(450, 25);
             exitRequested = true;
         }
         return;
@@ -104,6 +351,11 @@ void WordSearchGame::update() {
 }
 
 void WordSearchGame::draw() {
+    if (state == SOPA_STATE_DIFFICULTY) {
+        drawDifficultyScreen();
+        return;
+    }
+
     arduboy.clear();
 
     // -------------------------------------------------------------------------
@@ -196,8 +448,15 @@ void WordSearchGame::draw() {
         int16_t wy = 9 + i * 7;
         drawMiniText(96, wy, activeWords[i].text);
         if (activeWords[i].found) {
-            arduboy.drawFastHLine(96, wy + 2, 21, WHITE);
-            drawMiniText(118, wy, "[X]");
+            uint8_t wlen = strlen(activeWords[i].text);
+            if (wlen <= 5) {
+                arduboy.drawFastHLine(96, wy + 2, 21, WHITE);
+                drawMiniText(118, wy, "[X]");
+            } else {
+                int16_t lineW = (wlen * 4) - 1;
+                if (lineW > 31) lineW = 31;
+                arduboy.drawFastHLine(96, wy + 2, lineW, WHITE);
+            }
         }
     }
 
@@ -218,11 +477,11 @@ void WordSearchGame::draw() {
         arduboy.drawRoundRect(8, 12, 112, 38, 3, WHITE);
         arduboy.setTextColor(WHITE);
         arduboy.setCursor(14, 16);
-        arduboy.print("!TEMA COMPLETADO!");
+        arduboy.print("!SOPA COMPLETADA!");
         arduboy.setCursor(24, 26);
         arduboy.printf("PUNTOS: %u", (unsigned int)score);
         arduboy.setCursor(16, 36);
-        arduboy.print("A:Sig  B:Salir");
+        arduboy.print("A:Nueva B:Salir");
     }
 }
 
