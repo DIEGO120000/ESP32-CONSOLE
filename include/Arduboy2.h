@@ -43,7 +43,7 @@ public:
 
     void initRandomSeed() {
         #if defined(ESP32)
-        randomSeed(analogRead(1) ^ millis() ^ esp_random());
+        randomSeed(analogRead(0) ^ millis() ^ esp_random());
         #else
         randomSeed(analogRead(0) ^ millis());
         #endif

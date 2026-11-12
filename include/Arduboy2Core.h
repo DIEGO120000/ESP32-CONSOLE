@@ -48,8 +48,8 @@
 // BOOT Button (Integrated on-board ESP32-C6)
 #define ARDUBOY_PIN_BOOT       9    // BOOT Button -> GPIO 9 (Active LOW, internal pullup)
 
-// Audio Buzzer Output Disabled (No buzzer connected)
-#define ARDUBOY_PIN_BUZZER     -1
+// Audio Buzzer Output (GPIO 1, LEDC PWM)
+#define ARDUBOY_PIN_BUZZER     1
 
 // Battery Telemetry ADC Pin (GPIO 2 / ADC1_CH2, 1:2 Divider 100k/100k)
 #define ARDUBOY_PIN_BATTERY    2
@@ -144,7 +144,7 @@ public:
         // 1. Explicit unbinding & isolation of GPIO 13, GPIO 2, GPIO 3 and all buttons + BOOT
         initPins();
 
-        // 2. Initialize Battery Telemetry ADC (GPIO 1 / ADC1_CH1)
+        // 2. Initialize Battery Telemetry ADC (GPIO 2 / ADC1_CH2)
         initBattery();
 
         // 3. Initialize I2C bus at 400kHz using EXCLUSIVELY GPIO 7 (SDA) and GPIO 6 (SCL)

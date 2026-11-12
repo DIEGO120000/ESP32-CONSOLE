@@ -392,6 +392,11 @@ public:
 
     bool isRunning = false;
 
+    // Marca de tiempo del ultimo comando valido recibido por WebSocket.
+    // main.cpp la usa para refrescar el temporizador de inactividad y que el
+    // OLED no entre en standby mientras se juega con los mandos moviles.
+    volatile unsigned long lastInputMs = 0;
+
 private:
     DNSServer dnsServer;
     WebServer webServer{80};
@@ -437,6 +442,7 @@ public:
         pausedBy = 0;
         p1Connected = false;
         p2Connected = false;
+        lastInputMs = 0;
 
         for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
             clients[i].active = false;
@@ -472,6 +478,7 @@ public:
         pausedBy = 0;
         p1Connected = false;
         p2Connected = false;
+        lastInputMs = 0;
 
         isRunning = false;
     }
@@ -667,6 +674,12 @@ private:
     }
 
     void dispatchPlayerInput(uint8_t slot, char cmd) {
+        // Solo los comandos de control validos cuentan como actividad
+        if (cmd != 'U' && cmd != 'u' && cmd != 'D' && cmd != 'd' && cmd != 'P') return;
+
+        // Cualquier paquete valido del mando mantiene la consola despierta
+        lastInputMs = millis();
+
         // Pause Toggle Command ('P')
         if (cmd == 'P') {
             if (pausedBy == 0) {

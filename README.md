@@ -5,7 +5,7 @@ Consola de videojuegos retro y emulador Arduboy / mini juegos para microcontrola
 ## 🚀 Características
 - **Plataforma:** ESP32-C6 (PlatformIO / Arduino Framework)
 - **Pantalla:** OLED SSD1306 128x64 (I2C)
-- **Audio & Melodías:** Sintetizador de tonos y buzzer (GPIO 2) / ArduboyTones
+- **Audio & Melodías:** Sintetizador de tonos y buzzer (GPIO 1) / ArduboyTones
 - **LED RGB:** WS2812 integrado (GPIO 8)
 - **Conectividad:** BLE (Bluetooth Low Energy)
 - **Juegos y Roms:** Emulación y juegos retro integrados (Ping Pong, Breakout, Space Invaders, etc.)

@@ -76,54 +76,80 @@ struct MathChallengeGame {
     MathButtonInput buttons[NUM_MATH_BUTTONS];
 
     // Anti-repetition and dynamic stochastic rotation (Fisher-Yates Bag)
-    static const uint8_t BASIC_OP_COUNT = 7;
+    // BASICA: solo el nucleo permitido (+ - x / y fracciones simples)
+    static const uint8_t BASIC_OP_COUNT = 5;
     uint8_t basicOpBag[BASIC_OP_COUNT];
     uint8_t basicBagIdx;
     int8_t lastBasicOp;
+
+    // ARITMETICA: nucleo completo + potencias + raices + despeje de x
+    static const uint8_t ARITH_OP_COUNT = 8;
+    uint8_t arithOpBag[ARITH_OP_COUNT];
+    uint8_t arithBagIdx;
+    int8_t lastArithOp;
+
     int8_t lastMixCat;
-    int8_t lastArithSubtype;
     int8_t lastCalcSubtype;
+    int8_t lastFracSubtype;
+    int8_t lastPowerKind;
+    int8_t lastRootKind;
+    int8_t lastSolveKind;
+
+    void shuffleOpBag(uint8_t* bag, uint8_t count) {
+        for (uint8_t i = 0; i < count; i++) {
+            bag[i] = i;
+        }
+        for (int i = count - 1; i > 0; i--) {
+            int j = random(0, i + 1);
+            uint8_t temp = bag[i];
+            bag[i] = bag[j];
+            bag[j] = temp;
+        }
+    }
+
+    uint8_t drawFromBag(uint8_t* bag, uint8_t& idx, int8_t& last, uint8_t count) {
+        if (idx >= count) {
+            shuffleOpBag(bag, count);
+            // Sin repeticion consecutiva entre vueltas de bolsa
+            if (count > 1 && bag[0] == last) {
+                uint8_t swapIdx = random(1, count);
+                uint8_t temp = bag[0];
+                bag[0] = bag[swapIdx];
+                bag[swapIdx] = temp;
+            }
+            idx = 0;
+        }
+        uint8_t op = bag[idx++];
+        last = op;
+        return op;
+    }
 
     void initOpBag() {
-        for (uint8_t i = 0; i < BASIC_OP_COUNT; i++) {
-            basicOpBag[i] = i;
-        }
-        for (int i = BASIC_OP_COUNT - 1; i > 0; i--) {
-            int j = random(0, i + 1);
-            uint8_t temp = basicOpBag[i];
-            basicOpBag[i] = basicOpBag[j];
-            basicOpBag[j] = temp;
-        }
+        shuffleOpBag(basicOpBag, BASIC_OP_COUNT);
         basicBagIdx = 0;
         lastBasicOp = -1;
+        shuffleOpBag(arithOpBag, ARITH_OP_COUNT);
+        arithBagIdx = 0;
+        lastArithOp = -1;
     }
 
     uint8_t getNextBasicOp() {
-        if (basicBagIdx >= BASIC_OP_COUNT) {
-            // Refill bag with all 7 operations
-            for (uint8_t i = 0; i < BASIC_OP_COUNT; i++) {
-                basicOpBag[i] = i;
-            }
-            // Shuffle with Fisher-Yates
-            for (int i = BASIC_OP_COUNT - 1; i > 0; i--) {
-                int j = random(0, i + 1);
-                uint8_t temp = basicOpBag[i];
-                basicOpBag[i] = basicOpBag[j];
-                basicOpBag[j] = temp;
-            }
-            // Guarantee no consecutive repeat across bag boundaries
-            if (basicOpBag[0] == lastBasicOp && BASIC_OP_COUNT > 1) {
-                uint8_t swapIdx = random(1, BASIC_OP_COUNT);
-                uint8_t temp = basicOpBag[0];
-                basicOpBag[0] = basicOpBag[swapIdx];
-                basicOpBag[swapIdx] = temp;
-            }
-            basicBagIdx = 0;
-        }
+        return drawFromBag(basicOpBag, basicBagIdx, lastBasicOp, BASIC_OP_COUNT);
+    }
 
-        uint8_t op = basicOpBag[basicBagIdx++];
-        lastBasicOp = op;
-        return op;
+    uint8_t getNextArithOp() {
+        return drawFromBag(arithOpBag, arithBagIdx, lastArithOp, ARITH_OP_COUNT);
+    }
+
+    // Subtipo aleatorio sin repetir el anterior (evita rachas del mismo tipo)
+    uint8_t nextVariant(uint8_t count, int8_t& last) {
+        if (count < 2) return 0;
+        uint8_t v;
+        do {
+            v = random(0, count);
+        } while (v == (uint8_t)last);
+        last = v;
+        return v;
     }
 
     void resetInputs() {
@@ -175,11 +201,9 @@ struct MathChallengeGame {
         exitRequested = false;
         playerSelection = -1;
 
-        // Fixed 1:1 hardware button mapping (4 D-Pad directions):
-        // Direction 1 (UP - GPIO 19)    -> Recuadro [1] (options[0])
-        // Direction 2 (DOWN - GPIO 20)  -> Recuadro [2] (options[1])
-        // Direction 3 (LEFT - GPIO 18)  -> Recuadro [3] (options[2])
-        // Direction 4 (RIGHT - GPIO 15) -> Recuadro [4] (options[3])
+        // Mapeo 1:1 de la cruceta (respuesta instantanea, sin cursor):
+        // ARRIBA -> Recuadro [1], ABAJO -> Recuadro [2]
+        // DERECHA -> Recuadro [3], IZQUIERDA -> Recuadro [4]
         buttons[0].pin = ARDUBOY_PIN_UP;     // GPIO 14 (UP)
         buttons[1].pin = ARDUBOY_PIN_DOWN;   // GPIO 18 (DOWN)
         buttons[2].pin = ARDUBOY_PIN_LEFT;   // GPIO 5  (LEFT)
@@ -187,11 +211,14 @@ struct MathChallengeGame {
         buttons[4].pin = ARDUBOY_PIN_SELECT; // GPIO 20 (CLICK CENTRAL / OK)
         resetInputs();
 
-        // Initialize stochastic 7-op bag & history
+        // Initialize stochastic op bags & history
         initOpBag();
         lastMixCat = -1;
-        lastArithSubtype = -1;
         lastCalcSubtype = -1;
+        lastFracSubtype = -1;
+        lastPowerKind = -1;
+        lastRootKind = -1;
+        lastSolveKind = -1;
 
         loadHighScore();
         silenceAudio();
@@ -296,23 +323,139 @@ struct MathChallengeGame {
         finalizeOptions();
     }
 
-    // 1. BASICA (+, -, x, /, Potencias, Raices, Ecuaciones Lineales)
-    void generateBasicQuestion() {
-        uint8_t opType = getNextBasicOp();
+    // --- Helpers de formato y empaquetado de opciones ---
+    void emitNumericAnswer(int32_t ans, int32_t* d) {
+        validateNumericDistractors(ans, d);
+        snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
+        for (int i = 0; i < 3; i++) {
+            snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
+        }
+    }
+
+    static int32_t gcdAbs(int32_t a, int32_t b) {
+        if (a < 0) a = -a;
+        if (b < 0) b = -b;
+        while (b != 0) {
+            int32_t t = a % b;
+            a = b;
+            b = t;
+        }
+        return (a == 0) ? 1 : a;
+    }
+
+    void formatFraction(int32_t num, int32_t den, char* out, size_t n) {
+        if (den == 0) den = 1;
+        if (den < 0) {
+            num = -num;
+            den = -den;
+        }
+        int32_t g = gcdAbs(num, den);
+        num /= g;
+        den /= g;
+        if (den == 1) snprintf(out, n, "%ld", (long)num);
+        else snprintf(out, n, "%ld/%ld", (long)num, (long)den);
+    }
+
+    void pushFractionOption(uint8_t slot, const char* text) {
+        snprintf(currentQ.options[slot], sizeof(currentQ.options[slot]), "%s", text);
+    }
+
+    bool fractionOptionUsed(const char* text, uint8_t placed) {
+        for (uint8_t j = 0; j < placed; j++) {
+            if (strcmp(currentQ.options[j + 1], text) == 0) return true;
+        }
+        return false;
+    }
+
+    // Respuesta fraccionaria + 3 distractores plausibles y distintos
+    void emitFractionAnswer(int32_t num, int32_t den, int32_t n1, int32_t d1,
+                            int32_t n2, int32_t d2) {
+        char correct[16];
+        formatFraction(num, den, correct, sizeof(correct));
+        pushFractionOption(0, correct);
+
+        char cand[6][16];
+        formatFraction(n1 + n2, d1 + d2, cand[0], sizeof(cand[0]));          // suma de partes
+        formatFraction(n1 * n2, d1 * d2, cand[1], sizeof(cand[1]));          // producto
+        formatFraction(n1 * d2 + n2 * d1, d1 * d2, cand[2], sizeof(cand[2]));// suma sin reducir
+        formatFraction(num + den, den, cand[3], sizeof(cand[3]));
+        formatFraction(num, den + 1, cand[4], sizeof(cand[4]));
+        formatFraction(n1 * d2 - n2 * d1, d1 * d2, cand[5], sizeof(cand[5]));// resta de numeradores
+
+        uint8_t placed = 0;
+        for (uint8_t c = 0; c < 6 && placed < 3; c++) {
+            if (strcmp(cand[c], correct) == 0) continue;
+            if (fractionOptionUsed(cand[c], placed)) continue;
+            pushFractionOption(placed + 1, cand[c]);
+            placed++;
+        }
+
+        int32_t bump = 1;
+        while (placed < 3) {
+            char extra[16];
+            formatFraction(num + bump, den + 1, extra, sizeof(extra));
+            if (strcmp(extra, correct) != 0 && !fractionOptionUsed(extra, placed)) {
+                pushFractionOption(placed + 1, extra);
+                placed++;
+            }
+            bump += 3;
+        }
+    }
+
+    // Fracciones simples: 0=suma, 1=resta, 2=producto, 3=division
+    void generateFractionQuestion(uint8_t ft) {
+        int32_t d1 = random(2, 7);
+        int32_t d2 = (random(0, 2) == 0) ? d1 : random(2, 7);
+        int32_t n1 = random(1, d1);
+        int32_t n2 = random(1, d2);
+        int32_t num;
+        int32_t den;
+
+        if (ft == 0) {
+            num = n1 * d2 + n2 * d1;
+            den = d1 * d2;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText),
+                     "%ld/%ld + %ld/%ld = ?", (long)n1, (long)d1, (long)n2, (long)d2);
+        } else if (ft == 1) {
+            int32_t diff = n1 * d2 - n2 * d1;
+            if (diff < 0) {
+                int32_t t = n1; n1 = n2; n2 = t;
+                t = d1; d1 = d2; d2 = t;
+                diff = -diff;
+            }
+            num = diff;
+            den = d1 * d2;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText),
+                     "%ld/%ld - %ld/%ld = ?", (long)n1, (long)d1, (long)n2, (long)d2);
+        } else if (ft == 2) {
+            num = n1 * n2;
+            den = d1 * d2;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText),
+                     "%ld/%ld x %ld/%ld = ?", (long)n1, (long)d1, (long)n2, (long)d2);
+        } else {
+            num = n1 * d2;
+            den = d1 * n2;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText),
+                     "%ld/%ld : %ld/%ld = ?", (long)n1, (long)d1, (long)n2, (long)d2);
+        }
+
+        emitFractionAnswer(num, den, n1, d1, n2, d2);
+    }
+
+    // NUCLEO DE BASICA: 0=suma, 1=resta, 2=multiplicacion, 3=division exacta, 4=fracciones
+    void generateCoreQuestion(uint8_t opType) {
         int32_t ans = 0;
         int32_t d[3];
 
         if (opType == 0) {
-            // --- Tipo 0: Suma (A + B = ? o A + B + C = ?) ---
+            // --- Suma de enteros (2 o 3 operandos, hasta 3 digitos) ---
             if (random(0, 3) == 0) {
-                // 3 operandos simples: a + b + c = ?
                 int16_t a = random(6, 35);
                 int16_t b = random(5, 30);
                 int16_t c = random(4, 25);
                 ans = a + b + c;
                 snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d+%d+%d = ?", a, b, c);
             } else {
-                // 2 operandos de 2 a 3 dígitos
                 int16_t a = random(15, 99);
                 int16_t b = random(12, 89);
                 ans = a + b;
@@ -322,7 +465,7 @@ struct MathChallengeGame {
             d[1] = ans + (random(0, 2) == 0 ? 1 : -1);
             d[2] = ans + (random(0, 2) == 0 ? 2 : -2);
         } else if (opType == 1) {
-            // --- Tipo 1: Resta (A - B = ?, sin negativos A > B) ---
+            // --- Resta de enteros (sin negativos: A > B) ---
             int16_t a = random(25, 130);
             int16_t b = random(6, a - 2);
             ans = a - b;
@@ -331,9 +474,8 @@ struct MathChallengeGame {
             d[1] = (ans > 10) ? (ans - 10) : (ans + 12);
             d[2] = ans + (random(0, 2) == 0 ? 1 : -1);
         } else if (opType == 2) {
-            // --- Tipo 2: Multiplicación (Tablas 2..15 o decenas) ---
+            // --- Multiplicacion (tablas 2..15 o decenas) ---
             if (random(0, 4) == 0) {
-                // Por decenas: e.g. 40 x 6 o 30 x 7
                 int16_t a = random(2, 10) * 10;
                 int16_t b = random(3, 9);
                 ans = a * b;
@@ -342,17 +484,16 @@ struct MathChallengeGame {
                 d[1] = (ans > a) ? (ans - a) : (ans + 20);
                 d[2] = (a / 10 + b) * 10;
             } else {
-                // Tablas 2..15
                 int16_t a = random(2, 16);
                 int16_t b = random(3, 15);
                 ans = a * b;
                 snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d x %d = ?", a, b);
                 d[0] = ans + a;
                 d[1] = (ans > b) ? (ans - b) : (ans + a * 2);
-                d[2] = a + b; // Error común de suma en vez de producto
+                d[2] = a + b; // Error comun: sumar en vez de multiplicar
             }
         } else if (opType == 3) {
-            // --- Tipo 3: División exacta (A / B = ?) ---
+            // --- Division entera exacta ---
             int16_t divisor = random(2, 15);
             int16_t quotient = random(2, 16);
             int16_t dividend = divisor * quotient;
@@ -361,174 +502,127 @@ struct MathChallengeGame {
             d[0] = (quotient > 2) ? (quotient - 1) : (quotient + 3);
             d[1] = quotient + 1;
             d[2] = (quotient > 3) ? (quotient - 2) : (quotient + 2);
-        } else if (opType == 4) {
-            // --- Tipo 4: Potenciación (A^2 bases 2..20 o A^3 bases 2..6) ---
-            if (random(0, 4) != 0) {
-                // Cuadrados: A^2
-                int16_t b = random(2, 21);
-                ans = b * b;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^2 = ?", b);
-                d[0] = b * 2; // Error común: b * 2
-                d[1] = (b > 2) ? ((b - 1) * (b - 1)) : ((b + 2) * (b + 2));
-                d[2] = (b + 1) * (b + 1);
-            } else {
-                // Cubos: A^3
-                int16_t b = random(2, 7);
-                ans = b * b * b;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^3 = ?", b);
-                d[0] = b * 3; // Error común: b * 3
-                d[1] = b * b; // Error común: b^2
-                d[2] = (b > 2) ? ((b - 1) * (b - 1) * (b - 1)) : ((b + 1) * (b + 1) * (b + 1));
-            }
-        } else if (opType == 5) {
-            // --- Tipo 5: Radicación exacta (RAIZ(A) = ? hasta 400) ---
-            int16_t r = random(2, 21);
-            int32_t sq = (int32_t)r * (int32_t)r;
-            ans = r;
-            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "RAIZ(%ld) = ?", (long)sq);
-            d[0] = (r > 2) ? (r - 1) : (r + 3);
-            d[1] = r + 1;
-            d[2] = (r > 3) ? (r - 2) : (r + 2);
         } else {
-            // --- Tipo 6: Despeje lineal de X (aX + b = c o aX - b = c) ---
-            if (random(0, 2) == 0) {
-                int16_t a = random(2, 9);
-                int16_t x = random(1, 15);
-                int16_t b = random(1, 21);
-                int16_t c = (a * x) + b;
-                ans = x;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%dx + %d = %d  x=?", a, b, c);
-            } else {
-                int16_t a = random(2, 8);
-                int16_t x = random(2, 15);
-                int16_t b = random(1, 16);
-                int16_t c = (a * x) - b;
-                ans = x;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%dx - %d = %d  x=?", a, b, c);
-            }
-            d[0] = (ans > 1) ? (ans - 1) : (ans + 3);
-            d[1] = ans + 1;
-            d[2] = (ans > 2) ? (ans - 2) : (ans + 2);
+            // --- Fracciones simples (suma, resta, producto, division) ---
+            uint8_t ft = nextVariant(4, lastFracSubtype);
+            generateFractionQuestion(ft);
+            return; // las fracciones emiten sus propias 4 opciones
         }
 
-        snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
-        validateNumericDistractors(ans, d);
-        for (int i = 0; i < 3; i++) {
-            snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
-        }
+        emitNumericAnswer(ans, d);
     }
 
-    // 2. ARITMETICA (Potencias, Raíces Exactas, Operaciones Combinadas)
-    void generateArithmeticQuestion() {
-        uint8_t subType;
-        do {
-            subType = random(0, 4); // 0: Powers, 1: Exact Square Roots, 2: Combined 1, 3: Combined 2
-        } while (subType == lastArithSubtype);
-        lastArithSubtype = subType;
-
+    // POTENCIACION BASICA (solo ARITMETICA): x^2, x^3, 2^n
+    void generatePowerQuestion() {
         int32_t ans = 0;
         int32_t d[3];
+        uint8_t kind = nextVariant(3, lastPowerKind);
 
-        if (subType == 0) {
-            // Powers: b^2 (b in [2, 12]) or b^3 (b in [2, 8])
-            if (random(0, 10) < 6) {
-                // b^2
-                int16_t b = random(2, 13);
-                ans = b * b;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^2 = ?", b);
-                d[0] = b * 2; // Common mistake: b * 2
-                d[1] = (b > 2) ? ((b - 1) * (b - 1)) : ((b + 2) * (b + 2));
-                d[2] = (b + 1) * (b + 1);
-            } else {
-                // b^3
-                int16_t b = random(2, 9);
-                ans = b * b * b;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^3 = ?", b);
-                d[0] = b * 3; // Common mistake: b * 3
-                d[1] = b * b; // Common mistake: b^2
-                d[2] = (b > 2) ? ((b - 1) * (b - 1) * (b - 1)) : ((b + 1) * (b + 1) * (b + 1));
-            }
-            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
-            validateNumericDistractors(ans, d);
-            for (int i = 0; i < 3; i++) {
-                snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
-            }
-        } else if (subType == 1) {
-            // Exact Square Roots: RAIZ(r^2) = ? where r in [2, 25]
-            int16_t r = random(2, 26);
+        if (kind == 0) {
+            int16_t b = random(2, 13);
+            ans = b * b;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^2 = ?", b);
+            d[0] = b * 2; // Error comun: b * 2
+            d[1] = (b > 2) ? ((b - 1) * (b - 1)) : ((b + 2) * (b + 2));
+            d[2] = (b + 1) * (b + 1);
+        } else if (kind == 1) {
+            int16_t b = random(2, 9);
+            ans = b * b * b;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d^3 = ?", b);
+            d[0] = b * 3; // Error comun: b * 3
+            d[1] = b * b; // Error comun: b^2
+            d[2] = (b > 2) ? ((b - 1) * (b - 1) * (b - 1)) : ((b + 1) * (b + 1) * (b + 1));
+        } else {
+            int16_t n = random(2, 8); // 2..7
+            ans = (int32_t)1 << n;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "2^%d = ?", n);
+            d[0] = n * 2;
+            d[1] = (int32_t)1 << (n - 1);
+            d[2] = ((int32_t)1 << (n + 1)) - 4;
+        }
+
+        emitNumericAnswer(ans, d);
+    }
+
+    // RADICACION EXACTA (solo ARITMETICA): raices cuadradas y cubicas
+    void generateRootQuestion() {
+        int32_t ans = 0;
+        int32_t d[3];
+        uint8_t kind = nextVariant(2, lastRootKind);
+
+        if (kind == 0) {
+            int16_t r = random(2, 21); // 2..20
             int32_t sq = (int32_t)r * (int32_t)r;
             ans = r;
             snprintf(currentQ.questionText, sizeof(currentQ.questionText), "RAIZ(%ld) = ?", (long)sq);
-            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
-            
-            d[0] = (r > 2) ? (r - 1) : (r + 3);
-            d[1] = r + 1;
-            d[2] = (r > 3) ? (r - 2) : (r + 2);
-            validateNumericDistractors(ans, d);
-            for (int i = 0; i < 3; i++) {
-                snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
-            }
-        } else if (subType == 2) {
-            // Combined: a + b x c OR a x b - c
-            if (random(0, 2) == 0) {
-                int16_t a = random(3, 16);
-                int16_t b = random(2, 9);
-                int16_t c = random(2, 9);
-                ans = a + (b * c);
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d + %d x %d = ?", a, b, c);
-                d[0] = (a + b) * c; // Precedence distractor
-                d[1] = ans + b;
-                d[2] = (ans > 4) ? (ans - 3) : (ans + 7);
-            } else {
-                int16_t a = random(3, 9);
-                int16_t b = random(3, 9);
-                int16_t c = random(1, (a * b) - 2);
-                ans = (a * b) - c;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%d x %d - %d = ?", a, b, c);
-                d[0] = a * (b - c); // Precedence distractor
-                d[1] = ans + 4;
-                d[2] = (ans > 5) ? (ans - 4) : (ans + 8);
-            }
-            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
-            validateNumericDistractors(ans, d);
-            for (int i = 0; i < 3; i++) {
-                snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
-            }
         } else {
-            // Combined: (a + b) x c OR a x b + c x d
-            if (random(0, 2) == 0) {
-                int16_t a = random(2, 9);
-                int16_t b = random(2, 9);
-                int16_t c = random(2, 6);
-                ans = (a + b) * c;
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "(%d+%d) x %d = ?", a, b, c);
-                d[0] = a + (b * c); // Precedence error
-                d[1] = ans + c;
-                d[2] = (ans > c) ? (ans - c) : (ans + 6);
-            } else {
-                int16_t a = random(2, 6);
-                int16_t b = random(2, 6);
-                int16_t c = random(2, 6);
-                int16_t dd = random(2, 6);
-                ans = (a * b) + (c * dd);
-                snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%dx%d + %dx%d = ?", a, b, c, dd);
-                d[0] = (a * b) + c + dd; // Multiplied only one pair
-                d[1] = ans + 5;
-                d[2] = (ans > 5) ? (ans - 4) : (ans + 9);
-            }
-            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%ld", (long)ans);
-            validateNumericDistractors(ans, d);
-            for (int i = 0; i < 3; i++) {
-                snprintf(currentQ.options[i + 1], sizeof(currentQ.options[i + 1]), "%ld", (long)d[i]);
-            }
+            int16_t r = random(2, 11); // 2..10
+            int32_t cb = (int32_t)r * (int32_t)r * (int32_t)r;
+            ans = r;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "RAIZ3(%ld) = ?", (long)cb);
         }
+
+        d[0] = (ans > 2) ? (ans - 1) : (ans + 3);
+        d[1] = ans + 1;
+        d[2] = (ans > 3) ? (ans - 2) : (ans + 2);
+        emitNumericAnswer(ans, d);
+    }
+
+    // DESPEJE BASICO (solo ARITMETICA): ax+b=c, ax-b=c, x/a=b
+    void generateSolveXQuestion() {
+        int32_t ans = 0;
+        int32_t d[3];
+        uint8_t kind = nextVariant(3, lastSolveKind);
+
+        if (kind == 0) {
+            int16_t a = random(2, 9);
+            int16_t x = random(1, 15);
+            int16_t b = random(1, 21);
+            int16_t c = (a * x) + b;
+            ans = x;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%dx + %d = %d  x=?", a, b, c);
+        } else if (kind == 1) {
+            int16_t a = random(2, 8);
+            int16_t x = random(2, 15);
+            int16_t maxB = (a * x) - 1;
+            if (maxB < 1) maxB = 1;
+            int16_t b = random(1, maxB + 1);
+            int16_t c = (a * x) - b;
+            ans = x;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "%dx - %d = %d  x=?", a, b, c);
+        } else {
+            int16_t a = random(2, 8);
+            int16_t b = random(2, 13);
+            ans = (int32_t)a * b;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "x/%d = %d  x=?", a, b);
+        }
+
+        d[0] = (ans > 1) ? (ans - 1) : (ans + 3);
+        d[1] = ans + 1;
+        d[2] = (ans > 2) ? (ans - 2) : (ans + 2);
+        emitNumericAnswer(ans, d);
+    }
+
+    // 1. BASICA: EXCLUSIVAMENTE + - x / enteras y fracciones simples.
+    //    Prohibido: potencias, raices, despeje de x, calculo.
+    void generateBasicQuestion() {
+        generateCoreQuestion(getNextBasicOp());
+    }
+
+    // 2. ARITMETICA: todo lo de BASICA + potencias + raices + despeje de x.
+    void generateArithmeticQuestion() {
+        uint8_t op = getNextArithOp();
+        if (op <= 4) generateCoreQuestion(op);
+        else if (op == 5) generatePowerQuestion();
+        else if (op == 6) generateRootQuestion();
+        else generateSolveXQuestion();
     }
 
     // 3. CALCULO (Derivadas Polinómicas Procedurales, Trigonométricas, etc.)
     void generateCalculusQuestion() {
         uint8_t subType;
         do {
-            subType = random(0, 8);
+            subType = random(0, 14);
         } while (subType == lastCalcSubtype);
         lastCalcSubtype = subType;
 
@@ -665,6 +759,66 @@ struct MathChallengeGame {
                 snprintf(currentQ.options[2], sizeof(currentQ.options[2]), "%de^x", k);
                 snprintf(currentQ.options[3], sizeof(currentQ.options[3]), "%de^(%dx)", k * k, k);
             }
+        } else if (subType == 8) {
+            // LIMITE polinomico: lim x->a (x^2 + b)
+            int16_t a = random(1, 5);
+            int16_t b = random(1, 10);
+            int32_t ans = (int32_t)a * a + b;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "lim x->%d x^2+%d = ?", a, b);
+
+            int32_t d[3];
+            d[0] = ans + 2;
+            d[1] = (ans > 3) ? (ans - 2) : (ans + 4);
+            d[2] = ((int32_t)a * a) - b; // Error: restar el termino constante
+            if (d[2] < 0) d[2] = ans + 6;
+            emitNumericAnswer(ans, d);
+        } else if (subType == 9) {
+            // LIMITE lineal: lim x->a (bx + c)
+            int16_t a = random(1, 5);
+            int16_t b = random(2, 7);
+            int16_t c = random(1, 12);
+            int32_t ans = (int32_t)a * b + c;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "lim x->%d %dx+%d = ?", a, b, c);
+
+            int32_t d[3];
+            d[0] = (int32_t)a * b; // Error: olvidar el termino constante
+            d[1] = ans + b;
+            d[2] = (ans > 3) ? (ans - 3) : (ans + 5);
+            emitNumericAnswer(ans, d);
+        } else if (subType == 10) {
+            // LIMITE notable trigonometrico
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "lim x->0 sen x/x = ?");
+            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "1");
+            snprintf(currentQ.options[1], sizeof(currentQ.options[1]), "0");
+            snprintf(currentQ.options[2], sizeof(currentQ.options[2]), "2");
+            snprintf(currentQ.options[3], sizeof(currentQ.options[3]), "-1");
+        } else if (subType == 11) {
+            // INTEGRAL inmediata polinomica: INT(k x^n) dx, con k = m*(n+1)
+            int16_t n = random(2, 6);        // exponente 2..5
+            int16_t m = random(1, 4);        // coeficiente resultante 1..3
+            int16_t k = m * (n + 1);
+            int16_t p = n + 1;
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "INT(%dx^%d)dx = ?", k, n);
+
+            if (m == 1) snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "x^%d", p);
+            else snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "%dx^%d", m, p);
+            snprintf(currentQ.options[1], sizeof(currentQ.options[1]), "%dx^%d", k, n);
+            snprintf(currentQ.options[2], sizeof(currentQ.options[2]), "%dx^%d/%d", k, p, p);
+            snprintf(currentQ.options[3], sizeof(currentQ.options[3]), "%dx^%d", k * (n + 1), p);
+        } else if (subType == 12) {
+            // INTEGRAL inmediata de coseno
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "INT(cos x)dx = ?");
+            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "sen x");
+            snprintf(currentQ.options[1], sizeof(currentQ.options[1]), "-sen x");
+            snprintf(currentQ.options[2], sizeof(currentQ.options[2]), "cos x");
+            snprintf(currentQ.options[3], sizeof(currentQ.options[3]), "-cos x");
+        } else if (subType == 13) {
+            // INTEGRAL inmediata de seno
+            snprintf(currentQ.questionText, sizeof(currentQ.questionText), "INT(sen x)dx = ?");
+            snprintf(currentQ.options[0], sizeof(currentQ.options[0]), "-cos x");
+            snprintf(currentQ.options[1], sizeof(currentQ.options[1]), "cos x");
+            snprintf(currentQ.options[2], sizeof(currentQ.options[2]), "sen x");
+            snprintf(currentQ.options[3], sizeof(currentQ.options[3]), "-sen x");
         } else {
             // Logarithmic & Reciprocal: d/dx(ln x), d/dx(1/x)
             if (random(0, 2) == 0) {
@@ -821,7 +975,7 @@ struct MathChallengeGame {
         bool upPressed = btnTriggered(0) || arduboy.justPressed(UP_BUTTON);
         bool downPressed = btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON);
         bool confirmPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2) || arduboy.justPressed(RIGHT_BUTTON);
-        bool exitPressed = arduboy.justPressed(LEFT_BUTTON);
+        bool exitPressed = arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON);
 
         if (upPressed) {
             sound.tone(880, 15);
@@ -849,7 +1003,7 @@ struct MathChallengeGame {
         bool upPressed = btnTriggered(0) || arduboy.justPressed(UP_BUTTON);
         bool downPressed = btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON);
         bool confirmPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2) || arduboy.justPressed(RIGHT_BUTTON);
-        bool backPressed = btnTriggered(3) || arduboy.justPressed(LEFT_BUTTON);
+        bool backPressed = arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON);
 
         if (upPressed) {
             sound.tone(880, 15);
@@ -890,20 +1044,17 @@ struct MathChallengeGame {
             }
         }
 
-        // Fixed 1:1 hardware button to option mapping (Active LOW, Falling Edge Trigger):
-        // Button 1 (GPIO 14) -> Recuadro [1] (options[0])
-        // Button 2 (GPIO 0)  -> Recuadro [2] (options[1])
-        // Button 3 (GPIO 7)  -> Recuadro [3] (options[2])
-        // Button 4 (GPIO 18) -> Recuadro [4] (options[3])
+        // Respuesta rapida 1:1 con la cruceta (falling edge, sin cursor):
+        // ARRIBA -> Opcion 1, ABAJO -> Opcion 2, DERECHA -> Opcion 3, IZQUIERDA -> Opcion 4
         int8_t chosen = -1;
         if (btnTriggered(0) || arduboy.justPressed(UP_BUTTON)) {
-            chosen = 0; // Box [1] -> UP (GPIO 14)
+            chosen = 0; // Opcion 1 -> UP
         } else if (btnTriggered(1) || arduboy.justPressed(DOWN_BUTTON)) {
-            chosen = 1; // Box [2] -> DOWN (GPIO 18)
-        } else if (btnTriggered(2) || arduboy.justPressed(LEFT_BUTTON)) {
-            chosen = 2; // Box [3] -> LEFT (GPIO 5)
+            chosen = 1; // Opcion 2 -> DOWN
         } else if (btnTriggered(3) || arduboy.justPressed(RIGHT_BUTTON)) {
-            chosen = 3; // Box [4] -> RIGHT (GPIO 19)
+            chosen = 2; // Opcion 3 -> RIGHT
+        } else if (btnTriggered(2) || arduboy.justPressed(LEFT_BUTTON)) {
+            chosen = 3; // Opcion 4 -> LEFT
         }
 
         if (chosen >= 0) {
@@ -966,8 +1117,8 @@ struct MathChallengeGame {
     }
 
     void updateGameOver() {
-        bool retryPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON) || btnTriggered(2);
-        bool exitPressed = btnTriggered(3) || arduboy.justPressed(LEFT_BUTTON);
+        bool retryPressed = btnTriggered(4) || arduboy.justPressed(A_BUTTON);
+        bool exitPressed = arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON);
 
         if (retryPressed) {
             sound.tone(1760, 50);
@@ -1050,8 +1201,8 @@ struct MathChallengeGame {
 
         // Bottom Bar
         arduboy.drawFastHLine(0, 56, 128, WHITE);
-        arduboy.setCursor(2, 57);
-        arduboy.print("UP/DN:Sel  OK:Entrar");
+        arduboy.setCursor(7, 57);
+        arduboy.print("U/D:SEL A:OK B:MENU");
     }
 
     void drawCatSelect() {
@@ -1061,32 +1212,32 @@ struct MathChallengeGame {
         arduboy.print("ELIGE CATEGORIA");
         arduboy.setTextColor(WHITE);
 
+        // Lista limpia, alineada a la izquierda: solo texto ASCII, sin iconos
         const char* cats[4] = {
-            "1. BASICA (+ - x / eq)",
-            "2. ARITMETICA (^,RAIZ)",
-            "3. CALCULO (d/dx)",
+            "1. BASICA",
+            "2. ARITMETICA",
+            "3. CALCULO",
             "4. MIX TOTAL"
         };
 
         for (uint8_t i = 0; i < 4; i++) {
-            int16_t y = 12 + (i * 11);
+            int16_t y = 14 + (i * 10);
             if (catCursor == i) {
-                arduboy.fillRect(2, y - 1, 124, 10, WHITE);
+                arduboy.fillRect(2, y - 2, 124, 11, WHITE);
                 arduboy.setTextColor(BLACK);
-                arduboy.setCursor(4, y);
-                arduboy.print("> ");
-                arduboy.print(cats[i]);
-                arduboy.setTextColor(WHITE);
             } else {
-                arduboy.setCursor(4, y);
-                arduboy.print("  ");
-                arduboy.print(cats[i]);
+                arduboy.setTextColor(WHITE);
             }
+            arduboy.setCursor(4, y);
+            arduboy.print((catCursor == i) ? ">" : " ");
+            arduboy.setCursor(12, y);
+            arduboy.print(cats[i]);
         }
+        arduboy.setTextColor(WHITE);
 
         arduboy.drawFastHLine(0, 56, 128, WHITE);
-        arduboy.setCursor(2, 57);
-        arduboy.print("UP/DN:Sel  OK:Jugar");
+        arduboy.setCursor(7, 57);
+        arduboy.print("U/D:SEL A:OK B:MENU");
     }
 
     void drawGameScreen() {
@@ -1132,27 +1283,28 @@ struct MathChallengeGame {
             arduboy.drawFastHLine(0, 8, 128, WHITE);
         }
 
-        // --- 2. CENTER QUESTION BOX (y = 13 to 30) ---
-        arduboy.drawRoundRect(2, 13, 124, 17, 2, WHITE);
-        arduboy.fillRect(3, 14, 122, 15, BLACK);
+        // --- 2. CENTER QUESTION BOX (y = 12 to 27) ---
+        arduboy.drawRoundRect(2, 12, 124, 16, 2, WHITE);
+        arduboy.fillRect(3, 13, 122, 14, BLACK);
 
         // Center question text
         uint8_t qLen = strlen(currentQ.questionText);
         int16_t qWidth = qLen * 6;
         int16_t qX = (128 - qWidth) / 2;
         if (qX < 4) qX = 4;
-        arduboy.setCursor(qX, 18);
+        arduboy.setCursor(qX, 16);
         arduboy.print(currentQ.questionText);
 
-        // --- 3. BOTTOM 4 OPTIONS (2x2 Grid, y = 32 to 62) ---
-        // Box 0 (Top-Left):     x = 2,  y = 32, w = 60, h = 14  -> Button 1 (GPIO 14)
-        // Box 1 (Top-Right):    x = 66, y = 32, w = 60, h = 14  -> Button 2 (GPIO 0)
-        // Box 2 (Bottom-Left):  x = 2,  y = 48, w = 60, h = 14  -> Button 3 (GPIO 7)
-        // Box 3 (Bottom-Right): x = 66, y = 48, w = 60, h = 14  -> Button 4 (GPIO 18)
+        // --- 3. 4 OPCIONES (2x2, y = 29 to 53) ---
+        // Opcion 1 = ARRIBA, Opcion 2 = ABAJO, Opcion 3 = DERECHA, Opcion 4 = IZQUIERDA
+        // Box 0 (Top-Left):     x = 2,  y = 29 -> Opcion 1 (UP)
+        // Box 1 (Top-Right):    x = 66, y = 29 -> Opcion 2 (DOWN)
+        // Box 2 (Bottom-Left):  x = 2,  y = 42 -> Opcion 3 (RIGHT)
+        // Box 3 (Bottom-Right): x = 66, y = 42 -> Opcion 4 (LEFT)
         const int16_t boxX[4] = {2, 66, 2, 66};
-        const int16_t boxY[4] = {32, 32, 48, 48};
+        const int16_t boxY[4] = {29, 29, 42, 42};
         const int16_t boxW = 60;
-        const int16_t boxH = 14;
+        const int16_t boxH = 12;
         const char btnPrefix[4][4] = {"1:", "2:", "3:", "4:"};
 
         for (uint8_t i = 0; i < 4; i++) {
@@ -1182,11 +1334,16 @@ struct MathChallengeGame {
                 arduboy.setTextColor(WHITE);
             }
 
-            arduboy.setCursor(bx + 3, by + 3);
+            arduboy.setCursor(bx + 3, by + 2);
             arduboy.print(btnPrefix[i]);
             arduboy.print(currentQ.options[i]);
         }
         arduboy.setTextColor(WHITE);
+
+        // --- 4. AYUDA DE CONTROLES (respuesta directa con la cruceta) ---
+        arduboy.drawFastHLine(0, 54, 128, WHITE);
+        arduboy.setCursor(13, 55);
+        arduboy.print("^:1  v:2  >:3  <:4");
     }
 
     void drawGameOverScreen() {

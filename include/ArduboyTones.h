@@ -8,6 +8,7 @@
 class ArduboyTones {
 private:
     static int speakerPin;
+    static bool activeBuzzer;
     static bool audioEnabled;
     static uint8_t volumeLevel;
     static unsigned long toneEndTime;
@@ -19,6 +20,19 @@ public:
 
     static void setSpeakerPin(int pin) {
         speakerPin = pin;
+        silenceHardware();
+    }
+
+    static void enableAudio(bool en) {
+        audioEnabled = en;
+        if (!audioEnabled) {
+            silenceHardware();
+        }
+    }
+
+    // Buzzer activo (con oscilador propio): se excita con nivel DC alto, no con PWM.
+    static void setActiveBuzzer(bool en) {
+        activeBuzzer = en;
         silenceHardware();
     }
 
@@ -54,6 +68,11 @@ public:
     static void tone(uint16_t freq) {
         if (speakerPin >= 0) {
             if (freq > 0 && audioEnabled && volumeLevel > 0) {
+                if (activeBuzzer) {
+                    // Nivel DC alto: el oscilador interno del buzzer genera el sonido
+                    pinMode(speakerPin, OUTPUT);
+                    digitalWrite(speakerPin, HIGH);
+                } else {
                 #if defined(ESP32)
                 ledcDetach(speakerPin);
                 esp_rom_gpio_pad_select_gpio((uint32_t)speakerPin);
@@ -61,6 +80,7 @@ public:
                 const uint8_t dutyTable[4] = {0, 20, 64, 128};
                 ledcWrite(speakerPin, dutyTable[volumeLevel]);
                 #endif
+                }
                 isTonePlaying = true;
                 toneEndTime = 0;
             } else {
@@ -72,6 +92,11 @@ public:
     static void tone(uint16_t freq, uint16_t dur) {
         if (speakerPin >= 0) {
             if (freq > 0 && dur > 0 && audioEnabled && volumeLevel > 0) {
+                if (activeBuzzer) {
+                    // Nivel DC alto: el oscilador interno del buzzer genera el sonido
+                    pinMode(speakerPin, OUTPUT);
+                    digitalWrite(speakerPin, HIGH);
+                } else {
                 #if defined(ESP32)
                 ledcDetach(speakerPin);
                 esp_rom_gpio_pad_select_gpio((uint32_t)speakerPin);
@@ -79,6 +104,7 @@ public:
                 const uint8_t dutyTable[4] = {0, 20, 64, 128};
                 ledcWrite(speakerPin, dutyTable[volumeLevel]);
                 #endif
+                }
                 isTonePlaying = true;
                 toneEndTime = millis() + dur;
             } else {
@@ -118,6 +144,7 @@ public:
 };
 
 inline int ArduboyTones::speakerPin = -1;
+inline bool ArduboyTones::activeBuzzer = false;
 inline bool ArduboyTones::audioEnabled = false;
 inline uint8_t ArduboyTones::volumeLevel = 0;
 inline unsigned long ArduboyTones::toneEndTime = 0;

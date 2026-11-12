@@ -76,9 +76,9 @@ static inline void drawLetter5x5(int16_t x, int16_t y, char c, uint8_t color) {
 }
 
 // -----------------------------------------------------------------------------
-// FUENTE MICRO-PIXEL 3x5 PARA EL PANEL LATERAL (A-Z, 0-9, SIMBOLOS)
+// FUENTE MICRO-PIXEL 3x5 PARA PANELES E INDICADORES (A-Z, 0-9, SIMBOLOS, <, >, (, ))
 // -----------------------------------------------------------------------------
-static const uint8_t PROGMEM miniFont3x5[43][5] = {
+static const uint8_t PROGMEM miniFont3x5[47][5] = {
     {0x2, 0x5, 0x7, 0x5, 0x5}, // A (0)
     {0x6, 0x5, 0x6, 0x5, 0x6}, // B (1)
     {0x3, 0x4, 0x4, 0x4, 0x3}, // C (2)
@@ -121,7 +121,11 @@ static const uint8_t PROGMEM miniFont3x5[43][5] = {
     {0x6, 0x4, 0x4, 0x4, 0x6}, // [ (39)
     {0x3, 0x1, 0x1, 0x1, 0x3}, // ] (40)
     {0x0, 0x0, 0x0, 0x0, 0x2}, // . (41)
-    {0x0, 0x0, 0x0, 0x0, 0x0}  // space (42)
+    {0x0, 0x0, 0x0, 0x0, 0x0}, // space (42)
+    {0x1, 0x2, 0x4, 0x2, 0x1}, // < (43)
+    {0x4, 0x2, 0x1, 0x2, 0x4}, // > (44)
+    {0x2, 0x4, 0x4, 0x4, 0x2}, // ( (45)
+    {0x4, 0x2, 0x2, 0x2, 0x4}  // ) (46)
 };
 
 static inline int8_t getMiniGlyphIndex(char c) {
@@ -135,6 +139,10 @@ static inline int8_t getMiniGlyphIndex(char c) {
     if (c == ']') return 40;
     if (c == '.') return 41;
     if (c == ' ') return 42;
+    if (c == '<') return 43;
+    if (c == '>') return 44;
+    if (c == '(') return 45;
+    if (c == ')') return 46;
     return -1;
 }
 
@@ -142,7 +150,8 @@ static inline uint8_t getMiniCharWidth(char c) {
     if (c == ':' || c == '.') return 2;
     if (c == ' ') return 2;
     if (c == '[' || c == ']') return 3;
-    return 4; // 3px de glifo + 1px de espaciado garantizado para todas las letras A-Z (incluida la 'I') y dígitos
+    if (c == '(' || c == ')') return 3;
+    return 4; // 3px de glifo + 1px de espaciado garantizado
 }
 
 static inline void drawMiniChar(int16_t x, int16_t y, char c, uint8_t color = WHITE) {
@@ -175,14 +184,21 @@ public:
     bool gameOver;
     bool victory;
 
-    int8_t cursorCol; // 0..10
-    int8_t cursorRow; // 0..5
+    int8_t cursorCol; // 0..14
+    int8_t cursorRow; // 0..6
     bool isSelecting;
     int8_t startCol;
     int8_t startRow;
 
-    char currentGrid[6][14];
-    SopaWord activeWords[5];
+    uint8_t vistaActual; // 0: Tablero, 1: Info Palabras
+    uint8_t scrollIndex; // Scroll vertical en VISTA 1
+
+    uint8_t heldDirection; // Auto-repeat / Glide: 0: Ninguno, 1: UP, 2: DOWN, 3: LEFT, 4: RIGHT
+    uint32_t dirHoldStartMs;
+    uint32_t dirLastRepeatMs;
+
+    char currentGrid[7][16];
+    SopaWord activeWords[10];
     uint8_t activeWordCount;
     uint8_t foundCount;
 
@@ -194,6 +210,9 @@ public:
     void update();
     void draw();
     void drawDifficultyScreen();
+    void drawBoardView();
+    void drawWordListView();
+    void transitionToView(uint8_t targetView);
     void saveHighScore();
     void loadHighScore();
 

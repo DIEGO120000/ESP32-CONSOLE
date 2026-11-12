@@ -12,20 +12,19 @@
 #include "hangman_words.h"
 #include "MathChallenge.h"
 #include "WordSearchGame.h"
+#include "games/trench_run.h"
+#include "games/road_trip.h"
+#include "games/wolfenstein.h"
 #include "WiFiGamepadServer.h"
 
-// =============================================================================
-// SYSTEM AUDIO & VOLUME MANAGEMENT (GPIO 2 - BUZZER)
-// =============================================================================
+// Buzzer ACTIVO: solo admite ON / MUTE (no hay volumen gradual por PWM)
 enum VolumeLevel {
     VOL_MUTE = 0,
-    VOL_BAJO,
-    VOL_MEDIO,
-    VOL_ALTO
+    VOL_ON
 };
 
-uint8_t sysVolume = VOL_ALTO;
-const char* const volumeLabels[] = {"MUTE", "BAJO", "MEDIO", "ALTO"};
+uint8_t sysVolume = VOL_ON;
+const char* const volumeLabels[] = {"MUTE", "ON"};
 
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
@@ -49,15 +48,15 @@ void loadSystemSettings() {
     Preferences prefs;
     if (prefs.begin("sys_cfg", true)) {
         sysBrightness = prefs.getUChar("brightness", 80);
-        sysVolume = prefs.getUChar("volume", VOL_ALTO);
+        sysVolume = prefs.getUChar("volume", VOL_ON);
         prefs.end();
     } else {
         sysBrightness = 80;
-        sysVolume = VOL_ALTO;
+        sysVolume = VOL_ON;
     }
 
     if (sysBrightness < 10 || sysBrightness > 100) sysBrightness = 80;
-    if (sysVolume > 3) sysVolume = VOL_ALTO;
+    if (sysVolume > 1) sysVolume = VOL_ON; // migra valores antiguos (2/3) a ON
 
     applyBrightness(sysBrightness);
     sound.setVolume(sysVolume);
@@ -72,8 +71,17 @@ void saveSystemSettings() {
     }
 }
 
+// Con buzzer activo el volumen es binario: encendido o silencio.
+void setSoundEnabled(bool on) {
+    sysVolume = on ? VOL_ON : VOL_MUTE;
+    sound.setVolume(sysVolume);
+    if (on) {
+        sound.tone(1200, 40); // confirmación audible solo al reactivar
+    }
+}
+
 // =============================================================================
-// BATTERY TELEMETRY SUBSYSTEM (GPIO 1 / ADC1_CH1 - 100k/100k Voltage Divider)
+// BATTERY TELEMETRY SUBSYSTEM (GPIO 2 / ADC1_CH2 - 100k/100k Voltage Divider)
 // =============================================================================
 uint32_t getBatteryRawMilliVolts() {
     return Arduboy2Core::getBatteryRawMilliVolts();
@@ -138,7 +146,7 @@ void updateRgbLed() {
 }
 
 // =============================================================================
-// MELODY & AUDIO SYNTHESIS SYSTEM (GPIO 2 - BUZZER)
+// MELODY & AUDIO SYNTHESIS SYSTEM (GPIO 1 - BUZZER)
 // =============================================================================
 struct Note {
     uint16_t freq;
@@ -5523,7 +5531,7 @@ struct HangmanGame {
         historyHead = 0;
         historyCount = 0;
         memset(recentWordHistory, 0xFF, sizeof(recentWordHistory));
-        randomSeed(analogRead(1) ^ millis() ^ esp_random());
+        randomSeed(analogRead(0) ^ millis() ^ esp_random());
         if (soundEnabled) {
             sound.tone(880, 40);
         }
@@ -5597,7 +5605,7 @@ struct HangmanGame {
     }
 
     void pickAWord() {
-        randomSeed(analogRead(1) ^ millis() ^ esp_random());
+        randomSeed(analogRead(0) ^ millis() ^ esp_random());
         uint16_t newWordIndex = 0;
         uint8_t attempts = 0;
         bool isRecent = false;
@@ -6611,6 +6619,9 @@ struct TrisGame {
 
 MathChallengeGame mathChallenge;
 WordSearchGame wordSearchGame;
+TrenchRunGame trenchRun;
+RoadTripGame roadTrip;
+WolfensteinGame wolfenstein;
 
 
 
@@ -6635,6 +6646,9 @@ enum SystemState {
     STATE_TRIS,
     STATE_MATH_CHALLENGE,
     STATE_SOPA,
+    STATE_TRENCH_RUN,
+    STATE_ROAD_TRIP,
+    STATE_WOLFENSTEIN,
     STATE_PIN_DIAGNOSTIC,
     STATE_SETTINGS
 };
@@ -6660,9 +6674,12 @@ const char* menuItems[] = {
     "14. TRIS",
     "15. Math Challenge",
     "16. Sopa de Letras",
-    "17. Test Pines Cruceta"
+    "17. Trench Run",
+    "18. Road Trip",
+    "19. Wolfenstein 3D",
+    "20. Test Pines Cruceta"
 };
-const uint8_t MENU_COUNT = 17;
+const uint8_t MENU_COUNT = 20;
 
 
 // System Pause & Power Management State
@@ -6730,6 +6747,15 @@ bool isCurrentGameActive() {
         case STATE_SOPA:
             return (wordSearchGame.state == SOPA_STATE_PLAYING);
 
+        case STATE_TRENCH_RUN:
+            return trenchRun.isPlaying();
+
+        case STATE_ROAD_TRIP:
+            return roadTrip.isPlaying();
+
+        case STATE_WOLFENSTEIN:
+            return wolfenstein.isPlaying();
+
         default:
             return false;
     }
@@ -6748,6 +6774,14 @@ bool currentGameHasSubmenu() {
         case STATE_TRIS:
             return true;
         case STATE_MATH_CHALLENGE:
+            return true;
+        case STATE_SOPA:
+            return true;
+        case STATE_TRENCH_RUN:
+            return true;
+        case STATE_ROAD_TRIP:
+            return true;
+        case STATE_WOLFENSTEIN:
             return true;
         default:
             return false;
@@ -6779,6 +6813,18 @@ void returnToCurrentGameSubmenu() {
             break;
         case STATE_MATH_CHALLENGE:
             mathChallenge.state = MATH_STATE_MODE_SELECT;
+            break;
+        case STATE_SOPA:
+            wordSearchGame.init();
+            break;
+        case STATE_TRENCH_RUN:
+            trenchRun.init();
+            break;
+        case STATE_ROAD_TRIP:
+            roadTrip.init();
+            break;
+        case STATE_WOLFENSTEIN:
+            wolfenstein.init();
             break;
         default:
             break;
@@ -6830,7 +6876,7 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
     arduboy.print(message);
     arduboy.display();
 
-    // Power-off sound sequence on GPIO 2
+    // Power-off sound sequence on GPIO 1
     sound.tone(880, 50); delay(70);
     sound.tone(659, 70); delay(90);
     sound.tone(440, 100); delay(120);
@@ -6858,6 +6904,11 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 }
 
 void setup() {
+    // Buzzer ACTIVO en GPIO 1 (se excita con nivel DC alto). Debe fijarse antes del pitido de encendido.
+    ArduboyTones::setSpeakerPin(ARDUBOY_PIN_BUZZER);
+    ArduboyTones::setActiveBuzzer(true);
+    ArduboyTones::enableAudio(true);
+    sound.setVolume(VOL_ON);
     sound.noTone();
 
     // 1. Inicialización y aislamiento de todos los pines de control (Cruceta 5 vías + Botones A/B + BOOT)
@@ -6894,7 +6945,7 @@ void setup() {
             esp_deep_sleep_start();
         }
 
-        // Pitido breve de confirmación de encendido en el Buzzer (GPIO 2)
+        // Pitido breve de confirmación de encendido en el Buzzer (GPIO 1)
         sound.tone(1400, 60);
         delay(80);
         sound.noTone();
@@ -6964,7 +7015,10 @@ void launchSelectedGame() {
     else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
     else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
     else if (menuCursor == 15) { wordSearchGame.init(); currentState = STATE_SOPA; }
-    else if (menuCursor == 16) { currentState = STATE_PIN_DIAGNOSTIC; }
+    else if (menuCursor == 16) { trenchRun.init(); currentState = STATE_TRENCH_RUN; }
+    else if (menuCursor == 17) { roadTrip.init(); currentState = STATE_ROAD_TRIP; }
+    else if (menuCursor == 18) { wolfenstein.init(); currentState = STATE_WOLFENSTEIN; }
+    else if (menuCursor == 19) { currentState = STATE_PIN_DIAGNOSTIC; }
 }
 
 // -------------------------------------------------------------------------
@@ -7034,7 +7088,7 @@ void drawSettingsScreen() {
         arduboy.setTextColor(BLACK);
     }
     arduboy.setCursor(4, y1);
-    arduboy.printf("2.VOLUMEN: [ %-5s ]", volumeLabels[sysVolume]);
+    arduboy.printf("2.SONIDO : [ %-5s ]", volumeLabels[sysVolume]);
     arduboy.setTextColor(WHITE);
 
     // Item 2: Batería (Lectura ADC en GPIO 2 - Voltaje y Porcentaje Li-Ion estabilizado)
@@ -7075,7 +7129,7 @@ void drawSettingsScreen() {
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    arduboy.print("B:- A:+ | RIGHT:MENU");
+    arduboy.print("B:MUTE A:ON | RIGHT:MENU");
 }
 
 void transitionMenuToSettings() {
@@ -7272,8 +7326,23 @@ void loop() {
         lastActivityTime = millis();
     }
 
+    // Mandos moviles por Wi-Fi (Pong 2P): cada comando valido recibido por
+    // WebSocket cuenta como actividad, igual que un boton fisico.
+    if (wifiGamepads.isRunning && wifiGamepads.lastInputMs != 0) {
+        if ((long)(wifiGamepads.lastInputMs - lastActivityTime) > 0) {
+            lastActivityTime = wifiGamepads.lastInputMs;
+        }
+    }
+
+    // Durante una partida LAN activa la pantalla permanece encendida aunque no
+    // se pulse ningun control fisico de la consola.
+    bool lanMatchActive = (currentState == STATE_PING_PONG &&
+                           pingPong.mode == PP_MODE_WIFI_2P &&
+                           pingPong.wifiMatchStarted &&
+                           !pingPong.gameOver);
+
     // Auto Standby tras 90s de inactividad (Screen Blanking)
-    if (millis() - lastActivityTime >= INACTIVITY_TIMEOUT_MS) {
+    if (!lanMatchActive && millis() - lastActivityTime >= INACTIVITY_TIMEOUT_MS) {
         melodyPlayer.stop();
         sound.noTone();
         Arduboy2Core::sendCommand(SSD1306_DISPLAYOFF);
@@ -7328,7 +7397,7 @@ void loop() {
                 }
             }
         } else {
-            // Activar pausa con Botón B si el juego está en curso activo
+            // Activar pausa con Botón B si el juego está en curso activo.
             if (isCurrentGameActive() && arduboy.justPressed(B_BUTTON)) {
                 gamePaused = true;
                 pauseMenuCursor = 0;
@@ -7342,7 +7411,11 @@ void loop() {
     bool allowGameUpdate = !gamePaused && !wasPausedThisFrame;
 
     // Universal Exit Combo: Hold A + B (o LEFT + B) >= 450ms returns to menu
-    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS) {
+    // Excluido en Trench Run y Road Trip: A/LEFT forman parte del control de
+    // juego y el combo se disparaba por accidente en plena partida.
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC &&
+        currentState != STATE_SETTINGS && currentState != STATE_TRENCH_RUN &&
+        currentState != STATE_ROAD_TRIP && currentState != STATE_WOLFENSTEIN) {
         bool comboHeld = (arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
                          (arduboy.pressed(A_BUTTON) && arduboy.pressed(B_BUTTON));
         if (comboHeld) {
@@ -7495,6 +7568,33 @@ void loop() {
             }
             break;
 
+        case STATE_TRENCH_RUN:
+            if (allowGameUpdate) trenchRun.update();
+            trenchRun.draw();
+            if (trenchRun.exitRequested) {
+                trenchRun.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+
+        case STATE_ROAD_TRIP:
+            if (allowGameUpdate) roadTrip.update();
+            roadTrip.draw();
+            if (roadTrip.exitRequested) {
+                roadTrip.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+
+        case STATE_WOLFENSTEIN:
+            if (allowGameUpdate) wolfenstein.update();
+            wolfenstein.draw();
+            if (wolfenstein.exitRequested) {
+                wolfenstein.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+
         case STATE_PIN_DIAGNOSTIC: {
             // Header Bar
             arduboy.fillRect(0, 0, 128, 9, WHITE);
@@ -7633,13 +7733,7 @@ void loop() {
                         sound.tone(600, 15);
                     }
                 } else if (settingsCursor == 1) {
-                    if (sysVolume > 0) {
-                        sound.setVolume(sysVolume - 1);
-                        sysVolume = sound.getVolume();
-                        sound.tone(1000, 30);
-                    } else {
-                        sound.tone(600, 15);
-                    }
+                    setSoundEnabled(false);
                 } else if (settingsCursor == 2 || settingsCursor == 3) {
                     sound.tone(900, 20);
                 }
@@ -7655,13 +7749,7 @@ void loop() {
                         sound.tone(700, 15);
                     }
                 } else if (settingsCursor == 1) {
-                    if (sysVolume < 3) {
-                        sound.setVolume(sysVolume + 1);
-                        sysVolume = sound.getVolume();
-                        sound.tone(1200, 30);
-                    } else {
-                        sound.tone(700, 15);
-                    }
+                    setSoundEnabled(true);
                 } else if (settingsCursor == 2) {
                     sound.tone(900, 20);
                 } else if (settingsCursor == 3) {
