@@ -1,5 +1,5 @@
-#include "games/trench_run.h"
-#include "games/trench_run_assets.h"
+#include "trench_run.h"
+#include "trench_run_assets.h"
 
 // =============================================================================
 // TRENCH RUN - restauracion del original de Lucas Cardinali

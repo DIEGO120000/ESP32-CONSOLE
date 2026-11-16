@@ -1,4 +1,4 @@
-#include "WordSearchGame.h"
+#include "sopa_letras.h"
 
 // =============================================================================
 // JUEGO: SOPA DE LETRAS PANTALLA COMPLETA CON VISTAS DESLIZABLES (ESP32-C6)

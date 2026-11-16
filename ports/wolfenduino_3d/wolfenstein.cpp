@@ -21,9 +21,9 @@
 
 #include <Arduino.h>
 
-#include "games/wolfenstein.h"
-#include "../wolf3d/Engine.h"
-#include "../wolf3d/WolfPlatform.h"
+#include "wolfenstein.h"
+#include "wolf3d/Engine.h"
+#include "wolf3d/WolfPlatform.h"
 
 
 struct WolfensteinGame::Impl

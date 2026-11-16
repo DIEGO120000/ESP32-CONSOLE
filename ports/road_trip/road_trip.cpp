@@ -1,5 +1,5 @@
-#include "games/road_trip.h"
-#include "games/road_trip_assets.h"
+#include "road_trip.h"
+#include "road_trip_assets.h"
 
 #include <math.h>
 

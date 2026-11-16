@@ -10,11 +10,30 @@
 #include "ProyectoBLE.h"
 #include "braindu_bitmaps.h"
 #include "hangman_words.h"
-#include "MathChallenge.h"
-#include "WordSearchGame.h"
-#include "games/trench_run.h"
-#include "games/road_trip.h"
-#include "games/wolfenstein.h"
+// Catálogo de ports (ver include/games_config.h para activar/desactivar)
+#include "games_config.h"
+
+#ifdef ENABLE_MATH_CHALLENGE
+  #include "../ports/math_challenge/math_challenge.h"
+#endif
+#ifdef ENABLE_SOPA_LETRAS
+  #include "../ports/sopa_letras/sopa_letras.h"
+#endif
+#ifdef ENABLE_TRENCH_RUN
+  #include "../ports/trench_run/trench_run.h"
+#endif
+#ifdef ENABLE_ROAD_TRIP
+  #include "../ports/road_trip/road_trip.h"
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
+  #include "../ports/wolfenduino_3d/wolfenstein.h"
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+  #include "../ports/cyber_escape/cyber_escape.h"
+#endif
+#ifdef ENABLE_SEA_BATTLE
+  #include "../ports/sea_battle/sea_battle.h"
+#endif
 #include "WiFiGamepadServer.h"
 
 // Buzzer ACTIVO: solo admite ON / MUTE (no hay volumen gradual por PWM)
@@ -365,6 +384,7 @@ struct PingPongGame {
     // 2P WiFi Gamepads Variables
     bool wifiMatchStarted;
     uint8_t winnerP;
+    unsigned long lobbyWarnUntil; // Aviso breve: falta un jugador en el lobby
 
     void init() {
         melodyPlayer.stop();
@@ -803,6 +823,7 @@ struct PingPongGame {
         victory = false;
         winnerP = 0;
         wifiMatchStarted = false;
+        lobbyWarnUntil = 0;
         serveNormal(1);
     }
 
@@ -818,11 +839,18 @@ struct PingPongGame {
                 return;
             }
 
-            // El host puede pulsar A para arrancar la partida
+            // El host puede pulsar A para arrancar, pero solo con LOS DOS
+            // mandos web conectados (P1 y P2). Sin ambos, la pulsacion se
+            // ignora y el estado ausente parpadea como aviso.
             if (arduboy.justPressed(A_BUTTON)) {
-                sound.tone(1760, 40);
-                wifiMatchStarted = true;
-                serveNormal(1);
+                if (wifiGamepads.p1Connected && wifiGamepads.p2Connected) {
+                    sound.tone(1760, 40);
+                    wifiMatchStarted = true;
+                    serveNormal(1);
+                } else {
+                    sound.tone(220, 70);
+                    lobbyWarnUntil = millis() + 1500;
+                }
             }
             return;
         }
@@ -950,36 +978,50 @@ struct PingPongGame {
 
     void drawWifi2P() {
         if (!wifiMatchStarted) {
-            // Eliminacion formal de artefactos visuales y lineas huerfanas
+            // Pantalla limpia: borra cualquier residuo del frame anterior.
             arduboy.fillRect(0, 0, 128, 64, BLACK);
 
-            // Lobby de Conexion y Estado de Mandos
+            // Barra de titulo
             arduboy.fillRect(0, 0, 128, 9, WHITE);
             arduboy.setTextColor(BLACK);
-            arduboy.setCursor(16, 1);
+            arduboy.setCursor(4, 1);
             arduboy.print("2P WIFI GAMEPADS");
             arduboy.setTextColor(WHITE);
 
-            arduboy.setCursor(2, 13);
-            arduboy.print("WiFi: RetroArcade-ESP32");
-            arduboy.setCursor(2, 23);
-            arduboy.print("Web:  192.168.4.1");
+            // Margen izquierdo seguro X = 4 y solo ASCII estandar.
+            arduboy.setCursor(4, 12);
+            arduboy.print("AP RetroArcade-ESP32");
+            arduboy.setCursor(4, 22);
+            arduboy.print("Web:192.168.4.1");
 
-            arduboy.drawFastHLine(2, 33, 124, WHITE);
+            arduboy.drawFastHLine(4, 32, 120, WHITE);
+
+            const bool twoPlayers = wifiGamepads.p1Connected && wifiGamepads.p2Connected;
+            // Parpadeo del jugador que falta durante 1.5 s tras pulsar A.
+            const bool warnActive = (long)(millis() - lobbyWarnUntil) < 0;
+            const bool blinkOn = !warnActive || ((millis() / 250) % 2 == 0);
 
             arduboy.setCursor(4, 36);
-            arduboy.print("P1 (Izq): ");
+            arduboy.print("P1(Izq):");
             if (wifiGamepads.p1Connected) arduboy.print("[CONECTADO]");
-            else arduboy.print("[ESPERANDO]");
+            else if (blinkOn) arduboy.print("[ESPERANDO]");
 
             arduboy.setCursor(4, 46);
-            arduboy.print("P2 (Der): ");
+            arduboy.print("P2(Der):");
             if (wifiGamepads.p2Connected) arduboy.print("[CONECTADO]");
-            else arduboy.print("[ESPERANDO]");
+            else if (blinkOn) arduboy.print("[ESPERANDO]");
 
-            arduboy.drawFastHLine(0, 55, 128, WHITE);
-            arduboy.setCursor(6, 57);
-            arduboy.print("A:Iniciar    B:Salir");
+            arduboy.drawFastHLine(4, 55, 120, WHITE);
+
+            arduboy.setCursor(4, 57);
+            if (twoPlayers) arduboy.print("A:Iniciar");
+            else arduboy.print("Esperando 2P");
+
+            arduboy.setCursor(82, 57);
+            arduboy.print("B:Salir");
+
+            // Garantiza un borde izquierdo limpio (X = 0..3 sin basura).
+            arduboy.fillRect(0, 12, 4, 52, BLACK);
             return;
         }
 
@@ -6617,11 +6659,27 @@ struct TrisGame {
     }
 } trisGame;
 
+#ifdef ENABLE_MATH_CHALLENGE
 MathChallengeGame mathChallenge;
+#endif
+#ifdef ENABLE_SOPA_LETRAS
 WordSearchGame wordSearchGame;
+#endif
+#ifdef ENABLE_TRENCH_RUN
 TrenchRunGame trenchRun;
+#endif
+#ifdef ENABLE_ROAD_TRIP
 RoadTripGame roadTrip;
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
 WolfensteinGame wolfenstein;
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+CyberEscapeGame cyberEscape;
+#endif
+#ifdef ENABLE_SEA_BATTLE
+SeaBattleGame seaBattle;
+#endif
 
 
 
@@ -6644,11 +6702,27 @@ enum SystemState {
     STATE_BRAINDU_TRAIN,
     STATE_HANGMAN,
     STATE_TRIS,
+#ifdef ENABLE_MATH_CHALLENGE
     STATE_MATH_CHALLENGE,
+#endif
+#ifdef ENABLE_SOPA_LETRAS
     STATE_SOPA,
+#endif
+#ifdef ENABLE_TRENCH_RUN
     STATE_TRENCH_RUN,
+#endif
+#ifdef ENABLE_ROAD_TRIP
     STATE_ROAD_TRIP,
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
     STATE_WOLFENSTEIN,
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+    STATE_CYBER_ESCAPE,
+#endif
+#ifdef ENABLE_SEA_BATTLE
+    STATE_SEA_BATTLE,
+#endif
     STATE_PIN_DIAGNOSTIC,
     STATE_SETTINGS
 };
@@ -6657,29 +6731,53 @@ SystemState currentState = STATE_MENU;
 SystemState previousStateBeforeSettings = STATE_MENU;
 int8_t settingsCursor = 0;
 int8_t menuCursor = 0;
-const char* menuItems[] = {
-    "1. Ping Pong",
-    "2. Breakout",
-    "3. Space Invaders",
-    "4. 1943",
-    "5. Flappy Bird",
-    "6. Snake",
-    "7. Jump Man",
-    "8. Proyecto BLE",
-    "9. 2048",
-    "10. T-Rex Runner",
-    "11. Tic-Tac-Toe",
-    "12. BrainduTrain",
-    "13. Hangman",
-    "14. TRIS",
-    "15. Math Challenge",
-    "16. Sopa de Letras",
-    "17. Trench Run",
-    "18. Road Trip",
-    "19. Wolfenstein 3D",
-    "20. Test Pines Cruceta"
+// Registro del menu principal: una fila por juego. La numeracion visible se
+// calcula en el render (indice + 1), de modo que desactivar un port desde
+// include/games_config.h no deja numeros huecos ni desplaza la seleccion.
+struct MenuEntry {
+    const char* label;
+    SystemState state;
 };
-const uint8_t MENU_COUNT = 20;
+
+const MenuEntry menuEntries[] = {
+    { "Ping Pong",          STATE_PING_PONG },
+    { "Breakout",           STATE_BREAKOUT },
+    { "Space Invaders",     STATE_SPACE_INVADERS },
+    { "1943",               STATE_1943 },
+    { "Flappy Bird",        STATE_FLAPPY_BIRD },
+    { "Snake",              STATE_SNAKE },
+    { "Jump Man",           STATE_JUMP_MAN },
+    { "Proyecto BLE",       STATE_PROYECTO_BLE },
+    { "2048",               STATE_2048 },
+    { "T-Rex Runner",       STATE_TREX_RUNNER },
+    { "Tic-Tac-Toe",        STATE_TIC_TAC_TOE },
+    { "BrainduTrain",       STATE_BRAINDU_TRAIN },
+    { "Hangman",            STATE_HANGMAN },
+    { "TRIS",               STATE_TRIS },
+#ifdef ENABLE_MATH_CHALLENGE
+    { "Math Challenge",     STATE_MATH_CHALLENGE },
+#endif
+#ifdef ENABLE_SOPA_LETRAS
+    { "Sopa de Letras",     STATE_SOPA },
+#endif
+#ifdef ENABLE_TRENCH_RUN
+    { "Trench Run",         STATE_TRENCH_RUN },
+#endif
+#ifdef ENABLE_ROAD_TRIP
+    { "Road Trip",          STATE_ROAD_TRIP },
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
+    { "Wolfenstein 3D",     STATE_WOLFENSTEIN },
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+    { "Cyber Escape",       STATE_CYBER_ESCAPE },
+#endif
+#ifdef ENABLE_SEA_BATTLE
+    { "Sea Battle",         STATE_SEA_BATTLE },
+#endif
+    { "Test Pines Cruceta", STATE_PIN_DIAGNOSTIC }
+};
+const uint8_t MENU_COUNT = sizeof(menuEntries) / sizeof(menuEntries[0]);
 
 
 // System Pause & Power Management State
@@ -6741,20 +6839,42 @@ bool isCurrentGameActive() {
         case STATE_TRIS:
             return (trisGame.state == TRIS_STATE_PLAYING || trisGame.state == TRIS_STATE_FLASH);
 
+#ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE:
             return (mathChallenge.state == MATH_STATE_PLAYING || mathChallenge.state == MATH_STATE_FEEDBACK);
+#endif
 
+#ifdef ENABLE_SOPA_LETRAS
         case STATE_SOPA:
             return (wordSearchGame.state == SOPA_STATE_PLAYING);
+#endif
 
+#ifdef ENABLE_TRENCH_RUN
         case STATE_TRENCH_RUN:
             return trenchRun.isPlaying();
+#endif
 
+#ifdef ENABLE_ROAD_TRIP
         case STATE_ROAD_TRIP:
             return roadTrip.isPlaying();
+#endif
 
+#ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:
             return wolfenstein.isPlaying();
+#endif
+
+#ifdef ENABLE_CYBER_ESCAPE
+        case STATE_CYBER_ESCAPE:
+            return cyberEscape.isPlaying();
+#endif
+
+#ifdef ENABLE_SEA_BATTLE
+        case STATE_SEA_BATTLE:
+            // Solo la fase de combate admite pausa con B; en la colocacion B
+            // rota el barco dentro del propio juego.
+            return seaBattle.isCombat();
+#endif
 
         default:
             return false;
@@ -6773,16 +6893,34 @@ bool currentGameHasSubmenu() {
             return true;
         case STATE_TRIS:
             return true;
+#ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE:
             return true;
+#endif
+#ifdef ENABLE_SOPA_LETRAS
         case STATE_SOPA:
             return true;
+#endif
+#ifdef ENABLE_TRENCH_RUN
         case STATE_TRENCH_RUN:
             return true;
+#endif
+#ifdef ENABLE_ROAD_TRIP
         case STATE_ROAD_TRIP:
             return true;
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:
             return true;
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+        case STATE_CYBER_ESCAPE:
+            return true;
+#endif
+#ifdef ENABLE_SEA_BATTLE
+        case STATE_SEA_BATTLE:
+            return true;
+#endif
         default:
             return false;
     }
@@ -6811,21 +6949,41 @@ void returnToCurrentGameSubmenu() {
         case STATE_TRIS:
             trisGame.init();
             break;
+#ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE:
             mathChallenge.state = MATH_STATE_MODE_SELECT;
             break;
+#endif
+#ifdef ENABLE_SOPA_LETRAS
         case STATE_SOPA:
             wordSearchGame.init();
             break;
+#endif
+#ifdef ENABLE_TRENCH_RUN
         case STATE_TRENCH_RUN:
             trenchRun.init();
             break;
+#endif
+#ifdef ENABLE_ROAD_TRIP
         case STATE_ROAD_TRIP:
             roadTrip.init();
             break;
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:
             wolfenstein.init();
             break;
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+        case STATE_CYBER_ESCAPE:
+            cyberEscape.init();
+            break;
+#endif
+#ifdef ENABLE_SEA_BATTLE
+        case STATE_SEA_BATTLE:
+            seaBattle.init();
+            break;
+#endif
         default:
             break;
     }
@@ -6839,10 +6997,23 @@ void exitCurrentGameToMainMenu() {
         proyectoBLE.stop();
     } else if (currentState == STATE_2048) {
         game2048.saveHighScore();
+#ifdef ENABLE_MATH_CHALLENGE
     } else if (currentState == STATE_MATH_CHALLENGE) {
         mathChallenge.saveHighScore();
+#endif
+#ifdef ENABLE_SOPA_LETRAS
     } else if (currentState == STATE_SOPA) {
         wordSearchGame.saveHighScore();
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+    } else if (currentState == STATE_CYBER_ESCAPE) {
+        // Restaura la inversion de pantalla (niveles nocturnos) antes del menu
+        cyberEscape.init();
+#endif
+#ifdef ENABLE_SEA_BATTLE
+    } else if (currentState == STATE_SEA_BATTLE) {
+        seaBattle.init();
+#endif
     }
     melodyPlayer.stop();
     sound.noTone();
@@ -6862,10 +7033,14 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
         proyectoBLE.stop();
     } else if (currentState == STATE_2048) {
         game2048.saveHighScore();
+#ifdef ENABLE_MATH_CHALLENGE
     } else if (currentState == STATE_MATH_CHALLENGE) {
         mathChallenge.saveHighScore();
+#endif
+#ifdef ENABLE_SOPA_LETRAS
     } else if (currentState == STATE_SOPA) {
         wordSearchGame.saveHighScore();
+#endif
     }
     melodyPlayer.stop();
     arduboy.clear();
@@ -6999,26 +7174,48 @@ void launchSelectedGame() {
     sound.tone(1760, 50);
     gamePaused = false;
     pauseMenuCursor = 0;
-    if (menuCursor == 0) { pingPong.init(); currentState = STATE_PING_PONG; }
-    else if (menuCursor == 1) { breakout.init(); currentState = STATE_BREAKOUT; }
-    else if (menuCursor == 2) { spaceInvaders.init(); currentState = STATE_SPACE_INVADERS; }
-    else if (menuCursor == 3) { airCombat.init(); currentState = STATE_1943; }
-    else if (menuCursor == 4) { flappy.init(); currentState = STATE_FLAPPY_BIRD; }
-    else if (menuCursor == 5) { snake.init(); currentState = STATE_SNAKE; }
-    else if (menuCursor == 6) { jumpMan.init(); currentState = STATE_JUMP_MAN; }
-    else if (menuCursor == 7) { proyectoBLE.init(); currentState = STATE_PROYECTO_BLE; }
-    else if (menuCursor == 8) { game2048.init(); currentState = STATE_2048; }
-    else if (menuCursor == 9) { trexRunner.init(); currentState = STATE_TREX_RUNNER; }
-    else if (menuCursor == 10) { ticTacToe.init(); currentState = STATE_TIC_TAC_TOE; }
-    else if (menuCursor == 11) { brainduTrain.init(); currentState = STATE_BRAINDU_TRAIN; }
-    else if (menuCursor == 12) { hangmanGame.init(); currentState = STATE_HANGMAN; }
-    else if (menuCursor == 13) { trisGame.init(); currentState = STATE_TRIS; }
-    else if (menuCursor == 14) { mathChallenge.init(); currentState = STATE_MATH_CHALLENGE; }
-    else if (menuCursor == 15) { wordSearchGame.init(); currentState = STATE_SOPA; }
-    else if (menuCursor == 16) { trenchRun.init(); currentState = STATE_TRENCH_RUN; }
-    else if (menuCursor == 17) { roadTrip.init(); currentState = STATE_ROAD_TRIP; }
-    else if (menuCursor == 18) { wolfenstein.init(); currentState = STATE_WOLFENSTEIN; }
-    else if (menuCursor == 19) { currentState = STATE_PIN_DIAGNOSTIC; }
+    if (menuCursor < 0 || menuCursor >= MENU_COUNT) return;
+    const SystemState next = menuEntries[menuCursor].state;
+    switch (next) {
+        case STATE_PING_PONG:      pingPong.init();     break;
+        case STATE_BREAKOUT:       breakout.init();     break;
+        case STATE_SPACE_INVADERS: spaceInvaders.init();break;
+        case STATE_1943:           airCombat.init();    break;
+        case STATE_FLAPPY_BIRD:    flappy.init();       break;
+        case STATE_SNAKE:          snake.init();        break;
+        case STATE_JUMP_MAN:       jumpMan.init();      break;
+        case STATE_PROYECTO_BLE:   proyectoBLE.init();  break;
+        case STATE_2048:           game2048.init();     break;
+        case STATE_TREX_RUNNER:    trexRunner.init();   break;
+        case STATE_TIC_TAC_TOE:    ticTacToe.init();    break;
+        case STATE_BRAINDU_TRAIN:  brainduTrain.init(); break;
+        case STATE_HANGMAN:        hangmanGame.init();  break;
+        case STATE_TRIS:           trisGame.init();     break;
+#ifdef ENABLE_MATH_CHALLENGE
+        case STATE_MATH_CHALLENGE: mathChallenge.init();break;
+#endif
+#ifdef ENABLE_SOPA_LETRAS
+        case STATE_SOPA:           wordSearchGame.init();break;
+#endif
+#ifdef ENABLE_TRENCH_RUN
+        case STATE_TRENCH_RUN:     trenchRun.init();    break;
+#endif
+#ifdef ENABLE_ROAD_TRIP
+        case STATE_ROAD_TRIP:      roadTrip.init();     break;
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
+        case STATE_WOLFENSTEIN:    wolfenstein.init();  break;
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+        case STATE_CYBER_ESCAPE:   cyberEscape.init();  break;
+#endif
+#ifdef ENABLE_SEA_BATTLE
+        case STATE_SEA_BATTLE:     seaBattle.init();    break;
+#endif
+        case STATE_PIN_DIAGNOSTIC: break;   // sin init: pantalla de diagnostico
+        default: break;
+    }
+    currentState = next;
 }
 
 // -------------------------------------------------------------------------
@@ -7048,12 +7245,11 @@ void drawMainMenuScreen() {
             arduboy.setTextColor(BLACK);
             arduboy.setCursor(6, y);
             arduboy.print("> ");
-            arduboy.print(menuItems[itemIdx]);
+            arduboy.printf("%d. %s", itemIdx + 1, menuEntries[itemIdx].label);
             arduboy.setTextColor(WHITE);
         } else {
             arduboy.setCursor(6, y);
-            arduboy.print("  ");
-            arduboy.print(menuItems[itemIdx]);
+            arduboy.printf("  %d. %s", itemIdx + 1, menuEntries[itemIdx].label);
         }
     }
 
@@ -7291,8 +7487,10 @@ void loop() {
                     hangmanGame.onBootShortPress();
                 } else if (currentState == STATE_TRIS) {
                     trisGame.onBootShortPress();
+#ifdef ENABLE_MATH_CHALLENGE
                 } else if (currentState == STATE_MATH_CHALLENGE) {
                     mathChallenge.onBootShortPress();
+#endif
                 } else if (currentState != STATE_MENU && currentState != STATE_SETTINGS) {
                     if (gamePaused) {
                         gamePaused = false;
@@ -7414,8 +7612,23 @@ void loop() {
     // Excluido en Trench Run y Road Trip: A/LEFT forman parte del control de
     // juego y el combo se disparaba por accidente en plena partida.
     if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC &&
-        currentState != STATE_SETTINGS && currentState != STATE_TRENCH_RUN &&
-        currentState != STATE_ROAD_TRIP && currentState != STATE_WOLFENSTEIN) {
+        currentState != STATE_SETTINGS
+#ifdef ENABLE_TRENCH_RUN
+        && currentState != STATE_TRENCH_RUN
+#endif
+#ifdef ENABLE_ROAD_TRIP
+        && currentState != STATE_ROAD_TRIP
+#endif
+#ifdef ENABLE_WOLFENDUINO_3D
+        && currentState != STATE_WOLFENSTEIN
+#endif
+#ifdef ENABLE_CYBER_ESCAPE
+        && currentState != STATE_CYBER_ESCAPE
+#endif
+#ifdef ENABLE_SEA_BATTLE
+        && currentState != STATE_SEA_BATTLE
+#endif
+        ) {
         bool comboHeld = (arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
                          (arduboy.pressed(A_BUTTON) && arduboy.pressed(B_BUTTON));
         if (comboHeld) {
@@ -7426,8 +7639,10 @@ void loop() {
                     proyectoBLE.stop();
                 } else if (currentState == STATE_2048) {
                     game2048.saveHighScore();
+#ifdef ENABLE_MATH_CHALLENGE
                 } else if (currentState == STATE_MATH_CHALLENGE) {
                     mathChallenge.saveHighScore();
+#endif
                 }
                 melodyPlayer.stop();
                 sound.tone(600, 30);
@@ -7550,6 +7765,7 @@ void loop() {
             trisGame.draw();
             break;
 
+#ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE:
             if (allowGameUpdate) mathChallenge.update();
             mathChallenge.draw();
@@ -7558,7 +7774,9 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+#endif
 
+#ifdef ENABLE_SOPA_LETRAS
         case STATE_SOPA:
             if (allowGameUpdate) wordSearchGame.update();
             wordSearchGame.draw();
@@ -7567,7 +7785,9 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+#endif
 
+#ifdef ENABLE_TRENCH_RUN
         case STATE_TRENCH_RUN:
             if (allowGameUpdate) trenchRun.update();
             trenchRun.draw();
@@ -7576,7 +7796,9 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+#endif
 
+#ifdef ENABLE_ROAD_TRIP
         case STATE_ROAD_TRIP:
             if (allowGameUpdate) roadTrip.update();
             roadTrip.draw();
@@ -7585,7 +7807,9 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+#endif
 
+#ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:
             if (allowGameUpdate) wolfenstein.update();
             wolfenstein.draw();
@@ -7594,6 +7818,29 @@ void loop() {
                 currentState = STATE_MENU;
             }
             break;
+#endif
+
+#ifdef ENABLE_CYBER_ESCAPE
+        case STATE_CYBER_ESCAPE:
+            if (allowGameUpdate) cyberEscape.update();
+            cyberEscape.draw();
+            if (cyberEscape.exitRequested) {
+                cyberEscape.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+#endif
+
+#ifdef ENABLE_SEA_BATTLE
+        case STATE_SEA_BATTLE:
+            if (allowGameUpdate) seaBattle.update();
+            seaBattle.draw();
+            if (seaBattle.exitRequested) {
+                seaBattle.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+#endif
 
         case STATE_PIN_DIAGNOSTIC: {
             // Header Bar
