@@ -46,6 +46,9 @@
 #include "../ports/trench_run/trench_run.h"
 #include "../ports/trex_runner/trex_runner.h"
 #include "../ports/tris/tris.h"
+#ifdef ENABLE_EIGHTEEN_HOLES
+#include "../ports/eighteen_holes/eighteen_holes.h"
+#endif
 #include "../ports/wolfenduino_3d/wolfenstein.h"
 
 // =============================================================================
@@ -70,6 +73,9 @@ TicTacToeGame ticTacToe;
 BrainduTrainGame brainduTrain;
 HangmanGame hangmanGame;
 TrisGame trisGame;
+#ifdef ENABLE_EIGHTEEN_HOLES
+EighteenHolesGame eighteenHoles;
+#endif
 MathChallengeGame mathChallenge;
 WordSearchGame wordSearchGame;
 TrenchRunGame trenchRun;
@@ -239,6 +245,9 @@ static const SimEntry simMenu[] = {
 #endif
 #ifdef ENABLE_TRIS
     {"TRIS", [] { trisGame.init(); }, [] { trisGame.update(); }, [] { trisGame.draw(); }, nullptr},
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+    {"18 Holes", [] { eighteenHoles.init(); }, [] { eighteenHoles.update(); }, [] { eighteenHoles.draw(); }, nullptr},
 #endif
 #ifdef ENABLE_MATH_CHALLENGE
     {"Math Challenge", [] { mathChallenge.init(); }, [] { mathChallenge.update(); }, [] { mathChallenge.draw(); }, &mathChallenge.exitRequested},

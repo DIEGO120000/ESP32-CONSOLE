@@ -148,6 +148,7 @@ y subir el nuevo `.bin` por OTA (ver más abajo).
 | **BrainduTrain** | [`ports/braindu/`](ports/braindu/) | `ENABLE_BRAINDU` | `ports/braindu/media/cover.png` | Port interno |
 | **Hangman** | [`ports/hangman/`](ports/hangman/) | `ENABLE_HANGMAN` | `ports/hangman/media/cover.png` | serisman (port Arduboy) |
 | **TRIS** | [`ports/tris/`](ports/tris/) | `ENABLE_TRIS` | `ports/tris/media/cover.png` | OBONO (port Arduboy) |
+| **18 Holes** | [`ports/eighteen_holes/`](ports/eighteen_holes/) | `ENABLE_EIGHTEEN_HOLES` | `ports/eighteen_holes/media/cover.png` | ArduGolf, brow1067 — MPL-2.0 |
 
 Cada cartucho documenta sus controles e integración en su propio `README.md`; las
 convenciones, la plantilla y el índice están en **[`ports/README.md`](ports/README.md)**.

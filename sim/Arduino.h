@@ -40,7 +40,8 @@
 #define pgm_read_word(addr) (*reinterpret_cast<const uint16_t *>(addr))
 #define pgm_read_dword(addr) (*reinterpret_cast<const uint32_t *>(addr))
 #define pgm_read_float(addr) (*reinterpret_cast<const float *>(addr))
-#define pgm_read_ptr(addr) (*reinterpret_cast<void *const *>(addr))
+// const-correcto: los arrays PROGMEM de punteros suelen ser const.
+#define pgm_read_ptr(addr) (*reinterpret_cast<const void *const *>(addr))
 
 inline void *memcpy_P(void *dst, const void *src, size_t n) { return memcpy(dst, src, n); }
 inline size_t strlen_P(const char *s) { return strlen(s); }

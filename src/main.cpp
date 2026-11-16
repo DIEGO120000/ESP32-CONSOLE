@@ -277,6 +277,14 @@ HangmanGame hangmanGame;
 TrisGame trisGame;
 #endif
 
+#ifdef ENABLE_EIGHTEEN_HOLES
+#include "../ports/eighteen_holes/eighteen_holes.h"
+#endif
+
+#ifdef ENABLE_EIGHTEEN_HOLES
+EighteenHolesGame eighteenHoles;
+#endif
+
 #ifdef ENABLE_MATH_CHALLENGE
 MathChallengeGame mathChallenge;
 #endif
@@ -320,6 +328,9 @@ enum SystemState {
     STATE_BRAINDU_TRAIN,
     STATE_HANGMAN,
     STATE_TRIS,
+#ifdef ENABLE_EIGHTEEN_HOLES
+    STATE_EIGHTEEN_HOLES,
+#endif
 #ifdef ENABLE_MATH_CHALLENGE
     STATE_MATH_CHALLENGE,
 #endif
@@ -398,6 +409,9 @@ const MenuEntry menuEntries[] = {
 #endif
 #ifdef ENABLE_TRIS
     { "TRIS",               STATE_TRIS },
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+    { "18 Holes",           STATE_EIGHTEEN_HOLES },
 #endif
 #ifdef ENABLE_MATH_CHALLENGE
     { "Math Challenge",     STATE_MATH_CHALLENGE },
@@ -575,6 +589,10 @@ bool isCurrentGameActive() {
             return (trisGame.state == TRIS_STATE_PLAYING || trisGame.state == TRIS_STATE_FLASH);
 
 #endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+        case STATE_EIGHTEEN_HOLES:
+            return eighteenHoles.isPlaying();
+#endif
 #ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE:
             return (mathChallenge.state == MATH_STATE_PLAYING || mathChallenge.state == MATH_STATE_FEEDBACK);
@@ -617,6 +635,18 @@ bool isCurrentGameActive() {
     }
 }
 
+// Tecla de pausa universal del menu de consola. 18 Holes usa B *dentro* del
+// juego (menu interno, cancelar apuntado, saltar animaciones), asi que en ese
+// cartucho la pausa se dispara con el click central de la cruceta (GPIO 20).
+bool universalPausePressed() {
+#ifdef ENABLE_EIGHTEEN_HOLES
+    if (currentState == STATE_EIGHTEEN_HOLES) {
+        return arduboy.justPressed(SYSTEM_MENU_BUTTON);
+    }
+#endif
+    return arduboy.justPressed(B_BUTTON);
+}
+
 bool currentGameHasSubmenu() {
     switch (currentState) {
 #ifdef ENABLE_PING_PONG
@@ -637,6 +667,10 @@ bool currentGameHasSubmenu() {
 #endif
 #ifdef ENABLE_TRIS
         case STATE_TRIS:
+            return true;
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+        case STATE_EIGHTEEN_HOLES:
             return true;
 #endif
 #ifdef ENABLE_MATH_CHALLENGE
@@ -703,6 +737,11 @@ void returnToCurrentGameSubmenu() {
 #ifdef ENABLE_TRIS
         case STATE_TRIS:
             trisGame.init();
+            break;
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+        case STATE_EIGHTEEN_HOLES:
+            eighteenHoles.returnToTitle();
             break;
 #endif
 #ifdef ENABLE_MATH_CHALLENGE
@@ -774,6 +813,10 @@ void exitCurrentGameToMainMenu() {
 #ifdef ENABLE_SEA_BATTLE
     } else if (currentState == STATE_SEA_BATTLE) {
         seaBattle.init();
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+    } else if (currentState == STATE_EIGHTEEN_HOLES) {
+        eighteenHoles.init();
 #endif
     }
     melodyPlayer.stop();
@@ -984,6 +1027,9 @@ void launchSelectedGame() {
 #endif
 #ifdef ENABLE_TRIS
         case STATE_TRIS:           trisGame.init();     break;
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+        case STATE_EIGHTEEN_HOLES: eighteenHoles.init();break;
 #endif
 #ifdef ENABLE_MATH_CHALLENGE
         case STATE_MATH_CHALLENGE: mathChallenge.init();break;
@@ -1445,8 +1491,8 @@ void loop() {
                 }
             }
 
-            // 2. Botón B: Alternador de pausa / Atajo rápido para despausar inmediatamente
-            if (arduboy.justPressed(B_BUTTON)) {
+            // 2. Botón de pausa (B o click central): despausar de inmediato
+            if (universalPausePressed()) {
                 sound.tone(900, 30);
                 gamePaused = false;
             }
@@ -1466,7 +1512,7 @@ void loop() {
             }
         } else {
             // Activar pausa con Botón B si el juego está en curso activo.
-            if (isCurrentGameActive() && arduboy.justPressed(B_BUTTON)) {
+            if (isCurrentGameActive() && universalPausePressed()) {
                 gamePaused = true;
                 pauseMenuCursor = 0;
                 melodyPlayer.stop();
@@ -1497,6 +1543,10 @@ void loop() {
 #endif
 #ifdef ENABLE_SEA_BATTLE
         && currentState != STATE_SEA_BATTLE
+#endif
+#ifdef ENABLE_EIGHTEEN_HOLES
+        // En 18 Holes A y B son controles de juego (golpear / menu interno).
+        && currentState != STATE_EIGHTEEN_HOLES
 #endif
         ) {
         bool comboHeld = (arduboy.pressed(LEFT_BUTTON) && arduboy.pressed(B_BUTTON)) ||
@@ -1733,6 +1783,17 @@ void loop() {
             seaBattle.draw();
             if (seaBattle.exitRequested) {
                 seaBattle.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+#endif
+
+#ifdef ENABLE_EIGHTEEN_HOLES
+        case STATE_EIGHTEEN_HOLES:
+            if (allowGameUpdate) eighteenHoles.update();
+            eighteenHoles.draw();
+            if (eighteenHoles.exitRequested) {
+                eighteenHoles.exitRequested = false;
                 currentState = STATE_MENU;
             }
             break;

@@ -44,6 +44,7 @@ en tiempo de render, así que no quedan huecos.
 | BrainduTrain | `braindu/` | `ENABLE_BRAINDU` | `media/cover.png` | Port interno |
 | Hangman | `hangman/` | `ENABLE_HANGMAN` | `media/cover.png` | serisman (port Arduboy) |
 | TRIS | `tris/` | `ENABLE_TRIS` | `media/cover.png` | OBONO (port Arduboy) |
+| 18 Holes | `eighteen_holes/` | `ENABLE_EIGHTEEN_HOLES` | `media/cover.png` | ArduGolf, brow1067 — MPL-2.0 |
 | Sea Battle | `sea_battle/` | `ENABLE_SEA_BATTLE` | `media/cover.png` | Brady Heater (DarkestSpire), 2020 |
 | Trench Run | `trench_run/` | `ENABLE_TRENCH_RUN` | `media/cover.png` | Lucas Cardinali — MIT |
 | Road Trip | `road_trip/` | `ENABLE_ROAD_TRIP` | `media/cover.png` | Press Play on Tape — BSD 3-Clause |

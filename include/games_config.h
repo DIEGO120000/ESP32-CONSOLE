@@ -41,3 +41,6 @@
 #define ENABLE_BRAINDU
 #define ENABLE_HANGMAN
 #define ENABLE_TRIS
+
+// Minigolf 3D de 18 hoyos (ArduGolf, MPL-2.0): port fiel con el core original.
+#define ENABLE_EIGHTEEN_HOLES
