@@ -4,6 +4,11 @@
 #include "driver/gpio.h"
 #include "esp_rom_gpio.h"
 #endif
+#if defined(PC_EMULATOR)
+// Salida de audio del emulador (onda cuadrada en sim/main_sim.cpp).
+void simAudioTone(uint16_t freq);
+void simAudioOff();
+#endif
 
 class ArduboyTones {
 private:
@@ -61,6 +66,9 @@ public:
             gpio_set_level((gpio_num_t)speakerPin, 0);
         }
         #endif
+        #if defined(PC_EMULATOR)
+        simAudioOff();
+        #endif
         isTonePlaying = false;
         toneEndTime = 0;
     }
@@ -79,6 +87,8 @@ public:
                 ledcAttach(speakerPin, freq, 8);
                 const uint8_t dutyTable[4] = {0, 20, 64, 128};
                 ledcWrite(speakerPin, dutyTable[volumeLevel]);
+                #elif defined(PC_EMULATOR)
+                simAudioTone(freq);
                 #endif
                 }
                 isTonePlaying = true;
@@ -103,6 +113,8 @@ public:
                 ledcAttach(speakerPin, freq, 8);
                 const uint8_t dutyTable[4] = {0, 20, 64, 128};
                 ledcWrite(speakerPin, dutyTable[volumeLevel]);
+                #elif defined(PC_EMULATOR)
+                simAudioTone(freq);
                 #endif
                 }
                 isTonePlaying = true;

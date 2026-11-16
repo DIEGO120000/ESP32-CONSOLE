@@ -54,6 +54,9 @@ ArduboyTones sound(arduboy.audio.enabled);
 // SYSTEM CONFIGURATION & HARDWARE PERSISTENCE (NVS "sys_cfg")
 // =============================================================================
 uint8_t sysBrightness = 80; // 10% a 100% (pasos de 10%)
+// Mascara de visibilidad del catalogo en STATE_MENU (bit i = menuEntries[i]).
+// La escribe el panel web (/api/games) y se guarda en NVS "sys_cfg".
+uint32_t menuVisibleMask = 0xFFFFFFFFUL;
 
 void applyBrightness(uint8_t percent) {
     if (percent < 10) percent = 10;
@@ -68,10 +71,12 @@ void loadSystemSettings() {
     if (prefs.begin("sys_cfg", true)) {
         sysBrightness = prefs.getUChar("brightness", 80);
         sysVolume = prefs.getUChar("volume", VOL_ON);
+        menuVisibleMask = prefs.getUInt("games_mask", 0xFFFFFFFFUL);
         prefs.end();
     } else {
         sysBrightness = 80;
         sysVolume = VOL_ON;
+        menuVisibleMask = 0xFFFFFFFFUL;
     }
 
     if (sysBrightness < 10 || sysBrightness > 100) sysBrightness = 80;
@@ -86,6 +91,7 @@ void saveSystemSettings() {
     if (prefs.begin("sys_cfg", false)) {
         prefs.putUChar("brightness", sysBrightness);
         prefs.putUChar("volume", sysVolume);
+        prefs.putUInt("games_mask", menuVisibleMask);
         prefs.end();
     }
 }
@@ -417,6 +423,71 @@ const MenuEntry menuEntries[] = {
     { "Test Pines Cruceta", STATE_PIN_DIAGNOSTIC }
 };
 const uint8_t MENU_COUNT = sizeof(menuEntries) / sizeof(menuEntries[0]);
+
+// ---------------------------------------------------------------------------
+// VISIBILIDAD DEL CATALOGO (panel web /api/games <-> NVS "games_mask")
+// La mascara no borra codigo: el port sigue en la Flash y solo se oculta del
+// carrusel. Para liberar espacio hay que desactivar su #define en
+// include/games_config.h y subir el nuevo .bin por OTA.
+// ---------------------------------------------------------------------------
+bool menuGameVisible(uint8_t idx) {
+    if (idx >= MENU_COUNT) return false;
+    return (menuVisibleMask >> idx) & 0x1UL;
+}
+
+uint8_t menuVisibleCount() {
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < MENU_COUNT; i++) {
+        if (menuGameVisible(i)) n++;
+    }
+    return n;
+}
+
+uint8_t menuFirstVisible() {
+    for (uint8_t i = 0; i < MENU_COUNT; i++) {
+        if (menuGameVisible(i)) return i;
+    }
+    return 0;
+}
+
+// Siguiente entrada visible desde 'from' en la direccion 'dir' (+1/-1).
+uint8_t menuStepVisible(uint8_t from, int8_t dir) {
+    if (menuVisibleCount() == 0) return from;
+    int16_t i = from;
+    for (uint8_t n = 0; n < MENU_COUNT; n++) {
+        i = (i + dir + MENU_COUNT) % MENU_COUNT;
+        if (menuGameVisible((uint8_t)i)) return (uint8_t)i;
+    }
+    return from;
+}
+
+// API publica que consume ConsoleAdminWeb (declarada en console_core.h).
+uint8_t menuGameCount() {
+    return MENU_COUNT;
+}
+
+const char* menuGameLabel(uint8_t idx) {
+    return (idx < MENU_COUNT) ? menuEntries[idx].label : nullptr;
+}
+
+bool menuGameEnabled(uint8_t idx) {
+    return menuGameVisible(idx);
+}
+
+bool menuGameSetEnabled(uint8_t idx, bool enabled) {
+    if (idx >= MENU_COUNT) return false;
+    // Nunca dejar el menu vacio: siempre al menos un cartucho visible.
+    if (!enabled && menuGameVisible(idx) && menuVisibleCount() <= 1) return false;
+
+    const uint32_t before = menuVisibleMask;
+    if (enabled) menuVisibleMask |= (1UL << idx);
+    else menuVisibleMask &= ~(1UL << idx);
+    if (menuVisibleMask == before) return true;
+
+    saveSystemSettings(); // persistencia inmediata en NVS
+    if (!menuGameVisible(menuCursor)) menuCursor = menuFirstVisible();
+    return true;
+}
 
 
 // System Pause & Power Management State
@@ -867,10 +938,11 @@ void setup() {
 }
 
 void launchSelectedGame() {
+    if (menuCursor < 0 || menuCursor >= MENU_COUNT) return;
+    if (!menuGameVisible(menuCursor)) return; // entrada oculta desde el panel web
     sound.tone(1760, 50);
     gamePaused = false;
     pauseMenuCursor = 0;
-    if (menuCursor < 0 || menuCursor >= MENU_COUNT) return;
     const SystemState next = menuEntries[menuCursor].state;
     switch (next) {
 #ifdef ENABLE_PING_PONG
@@ -947,6 +1019,10 @@ static uint8_t slideBufMenu[1024];
 static uint8_t slideBufSettings[1024];
 
 void drawMainMenuScreen() {
+    // Si el cartucho seleccionado se oculto desde el panel web, saltar al
+    // primero visible sin reiniciar la consola.
+    if (!menuGameVisible(menuCursor)) menuCursor = menuFirstVisible();
+
     // Header Bar
     arduboy.fillRect(0, 0, 128, 9, WHITE);
     arduboy.setTextColor(BLACK);
@@ -954,24 +1030,35 @@ void drawMainMenuScreen() {
     arduboy.print("ESP32-C6 RETRO ARCADE");
     arduboy.setTextColor(WHITE);
 
-    // Menu Viewport (Displays 5 items with smooth scrolling)
-    uint8_t startIdx = 0;
-    if (menuCursor > 3) startIdx = menuCursor - 3;
-    if (startIdx + 5 > MENU_COUNT) startIdx = MENU_COUNT - 5;
+    // Menu Viewport: solo entradas visibles, numeradas 1..N sin huecos.
+    uint8_t visible[MENU_COUNT];
+    uint8_t visCount = 0;
+    for (uint8_t i = 0; i < MENU_COUNT; i++) {
+        if (menuGameVisible(i)) visible[visCount++] = i;
+    }
+    if (visCount == 0) { visible[0] = menuCursor; visCount = 1; }
 
-    for (uint8_t i = 0; i < 5; i++) {
-        uint8_t itemIdx = startIdx + i;
+    uint8_t pos = 0;
+    while (pos + 1 < visCount && visible[pos] != menuCursor) pos++;
+
+    uint8_t startIdx = 0;
+    if (pos > 3) startIdx = pos - 3;
+    if (startIdx + 5 > visCount) startIdx = (visCount > 5) ? (visCount - 5) : 0;
+    const uint8_t rows = (visCount < 5) ? visCount : 5;
+
+    for (uint8_t i = 0; i < rows; i++) {
+        uint8_t itemIdx = visible[startIdx + i];
         int16_t y = 11 + (i * 9);
         if (itemIdx == menuCursor) {
             arduboy.fillRect(2, y - 1, 124, 9, WHITE);
             arduboy.setTextColor(BLACK);
             arduboy.setCursor(6, y);
             arduboy.print("> ");
-            arduboy.printf("%d. %s", itemIdx + 1, menuEntries[itemIdx].label);
+            arduboy.printf("%d. %s", startIdx + i + 1, menuEntries[itemIdx].label);
             arduboy.setTextColor(WHITE);
         } else {
             arduboy.setCursor(6, y);
-            arduboy.printf("  %d. %s", itemIdx + 1, menuEntries[itemIdx].label);
+            arduboy.printf("  %d. %s", startIdx + i + 1, menuEntries[itemIdx].label);
         }
     }
 
@@ -1451,13 +1538,11 @@ void loop() {
                 // Navegación Vertical: EXCLUSIVAMENTE con la cruceta (UP y DOWN)
                 if (arduboy.justPressed(UP_BUTTON)) {
                     sound.tone(880, 15);
-                    menuCursor--;
-                    if (menuCursor < 0) menuCursor = MENU_COUNT - 1;
+                    menuCursor = menuStepVisible((uint8_t)menuCursor, -1);
                 }
                 if (arduboy.justPressed(DOWN_BUTTON)) {
                     sound.tone(700, 15);
-                    menuCursor++;
-                    if (menuCursor >= MENU_COUNT) menuCursor = 0;
+                    menuCursor = menuStepVisible((uint8_t)menuCursor, +1);
                 }
 
                 // Transición de deslizamiento horizontal hacia Ajustes al pulsar LEFT

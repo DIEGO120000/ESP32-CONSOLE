@@ -99,6 +99,13 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   .ports { display: flex; flex-wrap: wrap; gap: 7px; }
   .chip { font-size: 10px; padding: 5px 9px; border-radius: 7px; background: var(--panel2); border: 1px solid var(--line); color: #b6c2d9; letter-spacing: .4px; }
   .chip.on { border-color: rgba(0,240,255,.35); color: var(--cyan); }
+  .gamerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed #1e2438; }
+  .gamerow:last-child { border-bottom: 0; }
+  .gamerow .num { color: var(--muted); font-size: 11px; margin-right: 6px; }
+  .gamerow .gname { font-size: 12px; letter-spacing: .4px; }
+  .gamerow.off .gname { color: var(--muted); text-decoration: line-through; }
+  .note { font-size: 10.5px; color: var(--muted); line-height: 1.55; margin: 10px 0 0; }
+  .note code { color: #b6c2d9; background: var(--panel2); padding: 1px 4px; border-radius: 4px; }
   .drop {
     border: 2px dashed #2b3350; border-radius: 11px; padding: 18px 12px; text-align: center;
     color: var(--muted); font-size: 12px; cursor: pointer; transition: .15s; background: var(--panel2);
@@ -158,8 +165,9 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     </section>
 
     <section class="card">
-      <h2>Cartuchos en este firmware</h2>
-      <div class="ports" id="ports"><span class="chip">Cargando…</span></div>
+      <h2>Cartuchos en Menu</h2>
+      <div class="gamelist" id="games"><span class="chip">Cargando…</span></div>
+      <p class="note">Los interruptores ocultan el cartucho del carrusel al instante y se guardan en NVS; el codigo sigue ocupando Flash. Para liberar espacio, comenta su <code>#define</code> en <code>include/games_config.h</code> y sube el nuevo <code>.bin</code> por OTA.</p>
     </section>
 
     <section class="card wide">
@@ -230,18 +238,63 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
       var sec = Math.floor(s.uptime_ms / 1000);
       $("uptime").textContent = "UP " + Math.floor(sec / 60) + "m " + (sec % 60) + "s";
     }
-    if (s.ports) {
-      var box = $("ports");
-      box.innerHTML = "";
-      s.ports.forEach(function (p) {
-        var el = document.createElement("span");
-        el.className = "chip on";
-        el.textContent = p;
-        box.appendChild(el);
-      });
-      if (!s.ports.length) box.innerHTML = '<span class="chip">Ningun cartucho activo</span>';
-    }
+    if (s.games) renderGames(s.games);
   }
+
+  // Toggles de cartuchos: se construyen una vez y luego solo se sincroniza el
+  // estado, para no perder el foco ni el gesto mientras sondea /api/status.
+  var gamesBusy = 0;
+  function renderGames(list, force) {
+    var box = $("games");
+    if (box.getAttribute("data-count") !== String(list.length)) {
+      box.innerHTML = "";
+      list.forEach(function (g) {
+        var row = document.createElement("div");
+        row.className = "gamerow";
+        var label = document.createElement("span");
+        label.className = "gname";
+        label.innerHTML = '<span class="num">' + (g.id + 1) + '. </span>' + g.name;
+        var sw = document.createElement("label");
+        sw.className = "switch";
+        sw.innerHTML = '<input type="checkbox" data-id="' + g.id + '"><span></span>';
+        row.appendChild(label);
+        row.appendChild(sw);
+        box.appendChild(row);
+      });
+      box.setAttribute("data-count", list.length);
+    }
+    list.forEach(function (g) {
+      var cb = box.querySelector('input[data-id="' + g.id + '"]');
+      if (!cb) return;
+      if (force || document.activeElement !== cb) cb.checked = !!g.enabled;
+      cb.disabled = gamesBusy > 0;
+      cb.closest(".gamerow").classList.toggle("off", !g.enabled);
+    });
+  }
+
+  $("games").addEventListener("change", function (e) {
+    var cb = e.target;
+    if (!cb.matches || !cb.matches('input[type=checkbox][data-id]')) return;
+    var id = parseInt(cb.getAttribute("data-id"), 10);
+    gamesBusy++;
+    cb.disabled = true;
+    fetch("/api/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id, enabled: cb.checked ? 1 : 0 })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) {
+          cb.checked = !cb.checked;
+          alert(res.error || "No se pudo guardar");
+        }
+        if (res.games) renderGames(res.games, true);
+        setConn(true, "ONLINE");
+      })
+      .catch(function () { cb.checked = !cb.checked; setConn(false, "SIN CONEXION"); })
+      .then(function () { gamesBusy--; cb.disabled = false; });
+  });
 
   function poll() {
     if (uploading) return;
@@ -493,6 +546,7 @@ void ConsoleAdminWeb::begin(WebServer &server) {
     server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });
     server.on("/api/settings", HTTP_POST, [this]() { handleSettingsPost(); });
+    server.on("/api/games", HTTP_POST, [this]() { handleGamesPost(); });
     server.on("/api/restart", HTTP_POST, [this]() { handleRestart(); });
 
     server.on("/update", HTTP_POST,
@@ -553,6 +607,8 @@ void ConsoleAdminWeb::handleStatus() {
     json += __TIME__;
     json += F("\",\"ports\":");
     appendPortsJson(json);
+    json += F(",\"games\":");
+    appendGamesJson(json);
     json += '}';
 
     sendJson(200, json);
@@ -597,6 +653,57 @@ void ConsoleAdminWeb::handleSettingsPost() {
     json += (sysVolume > 0) ? 1 : 0;
     json += '}';
     sendJson(200, json);
+}
+
+// Lista del menu principal con su visibilidad actual. La numeracion (id) es
+// la posicion compilada en menuEntries, no la posicion visible.
+void ConsoleAdminWeb::appendGamesJson(String &out) {
+    const uint8_t count = menuGameCount();
+    out += '[';
+    for (uint8_t i = 0; i < count; i++) {
+        if (i) out += ',';
+        out += F("{\"id\":");
+        out += i;
+        out += F(",\"name\":\"");
+        const char* name = menuGameLabel(i);
+        if (name) {
+            for (const char* p = name; *p; p++) {
+                if (*p == '"' || *p == '\\') out += '\\';
+                out += *p;
+            }
+        }
+        out += F("\",\"enabled\":");
+        out += menuGameEnabled(i) ? 1 : 0;
+        out += '}';
+    }
+    out += ']';
+}
+
+void ConsoleAdminWeb::handleGamesPost() {
+    int id = -1;
+    int enabled = -1;
+    if (_server->hasArg("id")) id = _server->arg("id").toInt();
+    if (_server->hasArg("enabled")) enabled = _server->arg("enabled").toInt();
+
+    const String body = _server->arg("plain");
+    if (body.length()) {
+        id = jsonInt(body, "\"id\"", id);
+        enabled = jsonBool(body, "\"enabled\"", enabled);
+    }
+
+    if (id < 0 || id >= (int)menuGameCount() || enabled < 0) {
+        sendJson(400, F("{\"ok\":false,\"error\":\"id/enabled invalidos\"}"));
+        return;
+    }
+
+    const bool ok = menuGameSetEnabled((uint8_t)id, enabled != 0);
+    String json = F("{\"ok\":");
+    json += ok ? F("true") : F("false");
+    if (!ok) json += F(",\"error\":\"deja al menos un cartucho visible\"");
+    json += F(",\"games\":");
+    appendGamesJson(json);
+    json += '}';
+    sendJson(ok ? 200 : 409, json);
 }
 
 void ConsoleAdminWeb::handleRestart() {

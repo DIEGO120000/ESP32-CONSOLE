@@ -1,4 +1,8 @@
 #pragma once
+#if defined(PC_EMULATOR)
+// Build nativo: HAL de PC con framebuffer en RAM (sim/sim_Arduboy2Core.h).
+#include "sim_Arduboy2Core.h"
+#else
 #include <Arduino.h>
 #include <Wire.h>
 #include "EEPROM.h"
@@ -391,3 +395,4 @@ public:
         return smoothedPercentage;
     }
 };
+#endif // PC_EMULATOR

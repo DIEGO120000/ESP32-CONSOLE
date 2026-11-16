@@ -10,7 +10,12 @@
 #include <Arduino.h>
 #include "Arduboy2.h"
 #include "ArduboyTones.h"
+#if defined(PC_EMULATOR)
+// Build nativo (sim/): stub sin Wi-Fi, misma superficie que usa ping_pong.
+#include "sim_WiFiGamepads.h"
+#else
 #include "WiFiGamepadServer.h"   // declara wifiGamepads y el AP de juego 2P
+#endif
 
 extern Arduboy2 arduboy;
 extern ArduboyTones sound;
@@ -23,6 +28,15 @@ void applyBrightness(uint8_t percent);
 void setSoundEnabled(bool on);
 void loadSystemSettings();
 void saveSystemSettings();
+
+// --- Catalogo del menu principal (implementado en main.cpp) ------------------
+// Permite al panel web listar y ocultar cartuchos en caliente. La mascara se
+// persiste en NVS ("sys_cfg"/"games_mask") y no borra codigo de la Flash.
+uint8_t menuGameCount();
+const char* menuGameLabel(uint8_t idx);
+bool menuGameEnabled(uint8_t idx);
+// false si se intenta ocultar el ultimo cartucho visible.
+bool menuGameSetEnabled(uint8_t idx, bool enabled);
 
 // --- Telemetria de bateria (GPIO 2 / ADC1_CH2) -------------------------------
 float getBatteryVoltage();

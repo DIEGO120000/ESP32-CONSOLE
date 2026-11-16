@@ -8,6 +8,7 @@
 //   GET  /api/status     telemetria (bateria, flash, RAM, cartuchos)
 //   GET  /api/settings   ajustes actuales (brillo, sonido)
 //   POST /api/settings   aplica brillo (10..100) y sonido (0/1)
+//   POST /api/games      {id, enabled} oculta/muestra un cartucho del menu
 //   POST /api/restart    reinicia la consola
 //   POST /update         actualiza el firmware por bloques (Update.h)
 //
@@ -51,12 +52,14 @@ private:
     void handleStatus();
     void handleSettingsGet();
     void handleSettingsPost();
+    void handleGamesPost();
     void handleRestart();
     void handleOtaFinish();
     void handleOtaUpload();
 
     void sendJson(int code, const String &body);
     static void appendPortsJson(String &out);
+    static void appendGamesJson(String &out);
 };
 
 extern ConsoleAdminWeb consoleAdmin;

@@ -63,7 +63,7 @@ Placa: **ESP32-C6 Super Mini**. Pantalla: **SSD1309/SSD1306 2.42" 128×64**, I2C
 ## 🧱 Estructura del repositorio
 
 ```
-├── platformio.ini            entorno esp32c6_super_mini
+├── platformio.ini            entornos esp32c6_super_mini y pc_emulator
 ├── include/
 │   ├── Arduboy2Core.h        HAL: GPIO, I2C, botones, framebuffer
 │   ├── Arduboy2.h/.cpp       API estilo Arduboy (texto, bitmaps, sprites)
@@ -75,6 +75,7 @@ Placa: **ESP32-C6 Super Mini**. Pantalla: **SSD1309/SSD1306 2.42" 128×64**, I2C
 │   ├── Arduboy2.cpp ...
 ├── ports/                    catálogo de cartuchos (ver ports/README.md)
 │   └── <juego>/  <juego>.h  <juego>.cpp  *_assets.h  README.md  media/
+├── sim/                      emulador de PC (SDL2): shims de Arduino/HAL y main_sim.cpp
 └── flash_*.sh                scripts de flasheo
 ```
 
@@ -116,6 +117,12 @@ Comentar una macro elimina del build su código, su entrada de menú y su estado
 números del menú se recalculan solos. Es la forma recomendada de liberar flash (el
 motor de Wolfenstein 3D con sus assets ocupa la mayor parte del binario) sin tocar
 ningún juego.
+
+Además, el panel web (**Cartuchos en Menú**) permite ocultar/mostrar cada cartucho
+compilado al instante, sin recompilar ni reiniciar: la máscara se guarda en NVS
+(`sys_cfg`/`games_mask`) y el carrusel se renumera solo. Ocultar un juego **no** libera
+Flash: solo desaparece del menú. Para recuperar espacio hay que comentar su `#define`
+y subir el nuevo `.bin` por OTA (ver más abajo).
 
 ## 🎮 Catálogo de cartuchos
 
@@ -189,8 +196,9 @@ IP raiz. Tambien puedes tocar el engranaje ⚙ de la cabecera del mando web.
 |---|---|---|
 | `/admin` | GET | Panel retro responsive (HTML/CSS/JS en PROGMEM, sin internet) |
 | `/config` | GET | Alias del panel; `Host: config` en `/` hace lo mismo |
-| `/api/status` | GET | Batería (% y voltios), flash usada/libre, RAM libre y cartuchos activos |
+| `/api/status` | GET | Batería (% y voltios), flash usada/libre, RAM libre, cartuchos y estado `enabled` de cada juego |
 | `/api/settings` | GET / POST | Brillo OLED (10–100 %, contraste I2C `0x81`) y sonido on/off |
+| `/api/games` | POST | `{"id":3,"enabled":0}` oculta/muestra un cartucho y lo persiste en NVS (409 si dejaría el menú vacío) |
 | `/api/restart` | POST | Reinicio remoto |
 | `/update` | POST multipart | Subida de firmware `.bin` por bloques (`Update.h`) |
 
@@ -216,6 +224,45 @@ de NVS se conservan.
 
 > La primera actualización a esta tabla de particiones debe hacerse por USB una vez
 > (`pio run -t upload`); a partir de ahí las siguientes pueden ser 100 % por aire.
+
+## 💻 Emulador de PC (SDL2)
+
+El entorno `pc_emulator` compila los cartuchos reales de `ports/` para Linux/macOS y
+dibuja el mismo framebuffer OLED de 128x64 en una ventana de **640x320** (escala
+entera 5x, píxeles nítidos, azul OLED `#29B6F6` sobre `#05080C`). Sirve para probar
+cualquier port sin flashear la consola.
+
+```bash
+# Dependencia (Ubuntu/Debian)
+sudo apt install libsdl2-dev
+
+# Compilar y ejecutar
+pio run -e pc_emulator && .pio/build/pc_emulator/program
+```
+
+| Tecla | Botón |
+|---|---|
+| Flechas o `W/A/S/D` | Cruceta (`UP`/`LEFT`/`DOWN`/`RIGHT`) |
+| `Enter` o `Espacio` | `CENTER` (clic central, GPIO 20) |
+| `Z` o `J` | Botón `A` (GPIO 3) |
+| `X` o `K` | Botón `B` (GPIO 4) |
+| `P` o `Esc` | Pausa (congela el cartucho y muestra el overlay) |
+| `Retroceso` | Volver al menú del emulador |
+| `Q` o cerrar la ventana | Salir |
+
+Cómo está montado:
+
+- `sim/Arduino.h`, `sim/Print.h`, `sim/pgmspace.h`: API de Arduino para PC (tiempo,
+  `random`, `PROGMEM`, `F()`, `Serial`).
+- `sim/Preferences.h`: NVS simulada en el fichero local `sim_nvs.dat` (los records de
+  los cartuchos se conservan entre ejecuciones). `include/EEPROM.h` se reutiliza tal cual.
+- `sim/sim_Arduboy2Core.h`: HAL del OLED/botones sobre el framebuffer de 1024 bytes.
+- `sim/main_sim.cpp`: ventana, teclado, audio (onda cuadrada por SDL2), menú y bucle a 60 fps.
+
+El Wi-Fi no existe en PC: `sim/sim_WiFiGamepads.h` sustituye al AP de mandos por un
+stub, así que el submenú 2P del Ping Pong se puede abrir y cerrar sin red. El firmware
+(`src/main.cpp`, Wi-Fi, NVS y OTA reales) no se compila en este entorno, de modo que
+los cambios del emulador no pueden romper el binario del ESP32.
 
 ## 🕹️ Controles globales
 
