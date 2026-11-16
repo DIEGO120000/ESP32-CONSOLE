@@ -191,5 +191,5 @@ ArduboyTones derivan del proyecto Arduboy (MIT).
 
 - [x] Fase 1 — arquitectura `ports/` + `games_config.h` + documentación.
 - [ ] Portadas reales en `ports/<juego>/media/cover.png`.
-- [ ] Extraer los juegos inline de `main.cpp` a cartuchos independientes.
+- [x] Fase 2 — extraer los 13 juegos inline de `main.cpp` a cartuchos independientes.
 - [ ] Añadir captura de pantalla desde la propia consola (volcado por serie).
