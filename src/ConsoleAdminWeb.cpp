@@ -673,7 +673,7 @@ void ConsoleAdminWeb::appendGamesJson(String &out) {
             }
         }
         out += F("\",\"enabled\":");
-        out += menuGameEnabled(i) ? 1 : 0;
+        out += menuGameEnabled(i) ? F("true") : F("false");
         out += '}';
     }
     out += ']';
