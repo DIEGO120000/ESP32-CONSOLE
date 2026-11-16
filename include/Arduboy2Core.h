@@ -185,6 +185,15 @@ public:
         Wire.endTransmission();
     }
 
+    // Inversion de pantalla a nivel de controlador (0xA7 = ON, 0xA6 = normal).
+    // Equivalente a Arduboy2::invert() del original; no toca el framebuffer.
+    static void invert(bool inverse) {
+        Wire.beginTransmission(i2cAddress);
+        Wire.write(0x00);
+        Wire.write(inverse ? 0xA7 : 0xA6);
+        Wire.endTransmission();
+    }
+
     static void initDisplay() {
         Wire.beginTransmission(i2cAddress);
         Wire.write(0x00);
