@@ -3,8 +3,13 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <SHA1Builder.h>
 #include <base64.h>
+#include "ConsoleAdminWeb.h"
+
+// SSID del AP (unico punto de verdad: portal 2P y pantalla de CONFIG WEB).
+static const char WIFI_AP_SSID[] = "RetroArcade-ESP32";
 
 // =============================================================================
 // HTML/CSS/JS MOBILE GAMEPAD CONTROLLER (EMBEDDED IN PROGMEM)
@@ -442,17 +447,34 @@ public:
 
         WiFi.mode(WIFI_AP);
         WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
-        WiFi.softAP("RetroArcade-ESP32", nullptr, 1, 0, 4);
+        WiFi.softAP(WIFI_AP_SSID, nullptr, 1, 0, 4);
 
-        // DNS Server for Captive Portal redirection (resuelve * -> 192.168.4.1)
+        // DNS Server for Captive Portal redirection (resuelve * -> 192.168.4.1).
+        // El comodin tambien resuelve nombres con puntos, de modo que
+        // http://config.local y http://pingpong.local acaban en el AP.
         dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
         dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));
+
+        // mDNS: http://pingpong.local sin depender del DNS captivo (iOS,
+        // Android, Linux y Windows 10/11). Si falla, el portal sigue vivo.
+        if (MDNS.begin("pingpong")) {
+            MDNS.setInstanceName("RetroArcade ESP32");
+            MDNS.addService("http", "tcp", 80);
+            Serial.println("[WIFI] mDNS activo: http://pingpong.local");
+        } else {
+            Serial.println("[WIFI] mDNS no disponible (el portal sigue activo)");
+        }
 
         // Rutas explicitas de deteccion de portal cautivo (iOS CNA / Android /
         // Windows). Todas sirven el gamepad para que Safari abra la pagina
         // directamente en lugar de quedarse en blanco.
+        // Raiz: el Host decide que se sirve, para que http://config y
+        // http://config.local abran el panel de administracion y
+        // http://pingpong(.local) el mando 2P. Los sondeos de portal cautivo
+        // siempre sirven el gamepad.
+        webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
+
         static const char *captivePaths[] = {
-            "/",
             "/hotspot-detect.html",     // Apple iOS CNA
             "/library/test/success.html", // Apple iOS CNA (variante)
             "/generate_204",            // Android
@@ -500,6 +522,19 @@ public:
     // cautivo de iOS. Safari mantiene vivas las conexiones keep-alive y
     // cachea las respuestas de sondeo; forzamos cierre y no-cache para que
     // 192.168.4.1 cargue siempre a la primera.
+    // Host -> pagina. El DNS captivo responde cualquier nombre a 192.168.4.1,
+    // asi que "pingpong", "pingpong.local", "config" y "config.local" llegan
+    // aqui: "config" abre el panel; el resto, el mando.
+    void handleRoot() {
+        String host = webServer.hostHeader();
+        host.toLowerCase();
+        if (host.indexOf("config") >= 0) {
+            consoleAdmin.servePage();
+            return;
+        }
+        sendGamepadPage();
+    }
+
     void sendGamepadPage() {
         webServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0", true);
         webServer.sendHeader("Pragma", "no-cache", true);
@@ -522,6 +557,7 @@ public:
         wsServer.end();
         webServer.stop();
         dnsServer.stop();
+        MDNS.end();
         WiFi.softAPdisconnect(true);
         WiFi.mode(WIFI_OFF);
 

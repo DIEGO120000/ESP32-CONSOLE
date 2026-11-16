@@ -4,6 +4,7 @@
 // =============================================================================
 // Se monta sobre el WebServer del AP de mandos 2P (WiFiGamepadServer):
 //   GET  /admin          panel HTML/CSS/JS embebido en PROGMEM
+//   GET  /config         alias de /admin (http://config, 192.168.4.1/config)
 //   GET  /api/status     telemetria (bateria, flash, RAM, cartuchos)
 //   GET  /api/settings   ajustes actuales (brillo, sonido)
 //   POST /api/settings   aplica brillo (10..100) y sonido (0/1)
@@ -25,6 +26,9 @@ public:
     // Debe llamarse en cada vuelta del loop: gestiona el reinicio diferido
     // posterior a una OTA correcta.
     void update();
+
+    // Sirve el panel. Lo usa el enrutado por Host del AP para http://config.
+    void servePage() { handleAdminPage(); }
 
     // true mientras hay una subida .bin en curso o pendiente de reinicio.
     bool isUpdating() const { return _updating || _restartAt != 0; }

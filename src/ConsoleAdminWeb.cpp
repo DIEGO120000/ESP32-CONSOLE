@@ -488,6 +488,7 @@ void ConsoleAdminWeb::begin(WebServer &server) {
     _server = &server;
 
     server.on("/admin", HTTP_GET, [this]() { handleAdminPage(); });
+    server.on("/config", HTTP_GET, [this]() { handleAdminPage(); });
 
     server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/settings", HTTP_GET, [this]() { handleSettingsGet(); });

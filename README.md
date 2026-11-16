@@ -162,6 +162,10 @@ en el núcleo porque no es un cartucho de juego.
 4. Jugador 1 usa el mando web **o** la cruceta física; el jugador 2, solo el mando web.
 5. El WebSocket escucha en el puerto **81** y resuelve el host dinámicamente para
    funcionar tanto por IP como por el nombre del portal.
+6. Accesos rapidos sin escribir la IP:
+   - **`http://pingpong.local`** (mDNS) o **`http://pingpong`** → mando 2P.
+   - **`http://config.local`** o **`http://config`** → panel de administracion/OTA.
+   - **`http://192.168.4.1/config`** → el mismo panel por IP.
 
 Las rutas de sondeo de portal (`/hotspot-detect.html`, `/generate_204`, `/ncsi.txt`,
 `/connecttest.txt`, `/success.txt`, …) sirven el gamepad con cabeceras `no-store`, y
@@ -170,12 +174,21 @@ primera en Safari, Chrome y Windows.
 
 ## 🛠️ Panel de administración web y OTA
 
-Con el AP de mandos activo (**Ping Pong → 2P WiFi Gamepads**), abre
-**`http://192.168.4.1/admin`** o toca el engranaje ⚙ de la cabecera del mando web.
+Hay dos formas de levantar el AP:
+
+- **Ajustes → 3. CONFIG WEB** (Botón A): arranca el AP sin entrar en ningun juego y
+  muestra en el OLED el SSID, `http://config` y la IP. Se sale con **Botón B**, que
+  apaga el Wi-Fi y vuelve a Ajustes. Es la via recomendada para actualizar/OTA.
+- **Ping Pong → 2P WiFi Gamepads**: AP y mando, como siempre.
+
+En ambos casos abre **`http://config`**, **`http://config.local`** o
+**`http://192.168.4.1/config`**; el mando 2P sigue en `http://pingpong.local` o en la
+IP raiz. Tambien puedes tocar el engranaje ⚙ de la cabecera del mando web.
 
 | Ruta | Método | Función |
 |---|---|---|
 | `/admin` | GET | Panel retro responsive (HTML/CSS/JS en PROGMEM, sin internet) |
+| `/config` | GET | Alias del panel; `Host: config` en `/` hace lo mismo |
 | `/api/status` | GET | Batería (% y voltios), flash usada/libre, RAM libre y cartuchos activos |
 | `/api/settings` | GET / POST | Brillo OLED (10–100 %, contraste I2C `0x81`) y sonido on/off |
 | `/api/restart` | POST | Reinicio remoto |

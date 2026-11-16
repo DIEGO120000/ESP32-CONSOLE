@@ -336,7 +336,8 @@ enum SystemState {
     STATE_SEA_BATTLE,
 #endif
     STATE_PIN_DIAGNOSTIC,
-    STATE_SETTINGS
+    STATE_SETTINGS,
+    STATE_WEB_CONFIG
 };
 
 SystemState currentState = STATE_MENU;
@@ -1030,23 +1031,62 @@ void drawSettingsScreen() {
     arduboy.print(batStr);
     arduboy.setTextColor(WHITE);
 
-    // Item 3: Salir / Guardar
+    // Item 3: Panel web de configuracion / OTA (brillo y sonido ya se guardan
+    // solos en NVS, asi que no hace falta un boton de guardar).
     int16_t y3 = 43;
     if (settingsCursor == 3) {
         arduboy.fillRect(2, y3 - 1, 124, 9, WHITE);
         arduboy.setTextColor(BLACK);
-        arduboy.setCursor(10, y3);
-        arduboy.print("> GUARDAR Y SALIR <");
+        arduboy.setCursor(14, y3);
+        arduboy.print("> CONFIG WEB <");
         arduboy.setTextColor(WHITE);
     } else {
-        arduboy.setCursor(12, y3);
-        arduboy.print("[ GUARDAR Y SALIR ]");
+        arduboy.setCursor(16, y3);
+        arduboy.print("[ CONFIG WEB ]");
     }
 
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    arduboy.print("B:MUTE A:ON | RIGHT:MENU");
+    arduboy.print("B:SALIR | A:CAMBIAR");
+}
+
+// Pantalla del AP de configuracion (Ajustes -> CONFIG WEB).
+void drawConfigWebScreen() {
+    arduboy.fillRect(0, 0, 128, 9, WHITE);
+    arduboy.setTextColor(BLACK);
+    arduboy.setCursor(16, 1);
+    arduboy.print("CONFIGURACION WEB");
+    arduboy.setTextColor(WHITE);
+
+    arduboy.setCursor(1, 11);
+    arduboy.print("AP: RetroArcade-ESP32");
+    arduboy.setCursor(1, 21);
+    arduboy.print("Web: http://config");
+    arduboy.setCursor(1, 31);
+    arduboy.print("IP:  192.168.4.1");
+    arduboy.setCursor(1, 41);
+    arduboy.print("mDNS: pingpong.local");
+
+    arduboy.drawFastHLine(0, 56, 128, WHITE);
+    arduboy.setCursor(1, 57);
+    arduboy.print("B:APAGAR WIFI Y SALIR");
+}
+
+void enterConfigWebMode() {
+    sound.tone(1300, 30);
+    melodyPlayer.stop();
+    wifiGamepads.begin();
+    lastActivityTime = millis();
+    currentState = STATE_WEB_CONFIG;
+}
+
+void exitConfigWebMode() {
+    sound.tone(700, 30);
+    wifiGamepads.stop();
+    lastActivityTime = millis();
+    settingsCursor = 3;
+    currentState = STATE_SETTINGS;
 }
 
 void transitionMenuToSettings() {
@@ -1226,7 +1266,7 @@ void loop() {
                 } else if (currentState == STATE_MATH_CHALLENGE) {
                     mathChallenge.onBootShortPress();
 #endif
-                } else if (currentState != STATE_MENU && currentState != STATE_SETTINGS) {
+                } else if (currentState != STATE_MENU && currentState != STATE_SETTINGS && currentState != STATE_WEB_CONFIG) {
                     if (gamePaused) {
                         gamePaused = false;
                         sound.tone(900, 30);
@@ -1281,7 +1321,8 @@ void loop() {
 #endif
 
     // Auto Standby tras 90s de inactividad (Screen Blanking)
-    if (!lanMatchActive && millis() - lastActivityTime >= INACTIVITY_TIMEOUT_MS) {
+    if (!lanMatchActive && currentState != STATE_WEB_CONFIG &&
+        millis() - lastActivityTime >= INACTIVITY_TIMEOUT_MS) {
         melodyPlayer.stop();
         sound.noTone();
         Arduboy2Core::sendCommand(SSD1306_DISPLAYOFF);
@@ -1296,7 +1337,8 @@ void loop() {
     bool wasPausedThisFrame = gamePaused;
 
     // GESTOR GLOBAL DE PAUSA Y SALIDA UNIVERSAL (BOTON B, A, UP, DOWN)
-    if (currentState != STATE_MENU && currentState != STATE_SETTINGS && currentState != STATE_PIN_DIAGNOSTIC) {
+    if (currentState != STATE_MENU && currentState != STATE_SETTINGS &&
+        currentState != STATE_WEB_CONFIG && currentState != STATE_PIN_DIAGNOSTIC) {
         if (gamePaused) {
             bool hasSub = currentGameHasSubmenu();
             int8_t pauseItemCount = hasSub ? 3 : 2;
@@ -1353,7 +1395,7 @@ void loop() {
     // Excluido en Trench Run y Road Trip: A/LEFT forman parte del control de
     // juego y el combo se disparaba por accidente en plena partida.
     if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC &&
-        currentState != STATE_SETTINGS
+        currentState != STATE_SETTINGS && currentState != STATE_WEB_CONFIG
 #ifdef ENABLE_TRENCH_RUN
         && currentState != STATE_TRENCH_RUN
 #endif
@@ -1718,6 +1760,20 @@ void loop() {
             break;
         }
 
+        case STATE_WEB_CONFIG: {
+            // Atiende DNS captivo, HTTP (/config, /admin, /api/*, OTA) y mDNS.
+            wifiGamepads.update();
+            lastActivityTime = millis();
+
+            // Durante una OTA no se permite apagar el AP.
+            if (!consoleAdmin.isUpdating() && arduboy.justPressed(B_BUTTON)) {
+                exitConfigWebMode();
+                break;
+            }
+            drawConfigWebScreen();
+            break;
+        }
+
         case STATE_SETTINGS: {
             drawSettingsScreen();
 
@@ -1739,8 +1795,14 @@ void loop() {
                 if (settingsCursor > 3) settingsCursor = 0;
             }
 
-            // DISMINUIR con Botón B (GPIO 4) o cruceta LEFT
-            if (arduboy.justPressed(B_BUTTON) || arduboy.justPressed(LEFT_BUTTON)) {
+            // Botón B (GPIO 4): salir de Ajustes al menú principal
+            if (arduboy.justPressed(B_BUTTON)) {
+                transitionSettingsToMenu();
+                break;
+            }
+
+            // DISMINUIR con cruceta LEFT
+            if (arduboy.justPressed(LEFT_BUTTON)) {
                 if (settingsCursor == 0) {
                     if (sysBrightness > 10) {
                         applyBrightness(sysBrightness - 10);
@@ -1769,7 +1831,7 @@ void loop() {
                 } else if (settingsCursor == 2) {
                     sound.tone(900, 20);
                 } else if (settingsCursor == 3) {
-                    transitionSettingsToMenu();
+                    enterConfigWebMode();
                     break;
                 }
             }
@@ -1778,7 +1840,7 @@ void loop() {
     }
 
     // Cuadro de Pausa Universal Centrado con drawRoundRect
-    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS && gamePaused) {
+    if (currentState != STATE_MENU && currentState != STATE_PIN_DIAGNOSTIC && currentState != STATE_SETTINGS && currentState != STATE_WEB_CONFIG && gamePaused) {
         bool hasSub = currentGameHasSubmenu();
 
         arduboy.fillRect(14, 10, 100, 44, BLACK);
