@@ -128,6 +128,19 @@ ningún juego.
 | **Cyber Escape** | [`ports/cyber_escape/`](ports/cyber_escape/) | `ENABLE_CYBER_ESCAPE` | `ports/cyber_escape/media/cover.png` | SKRTM, 2026 |
 | **Sopa de Letras** | [`ports/sopa_letras/`](ports/sopa_letras/) | `ENABLE_SOPA_LETRAS` | `ports/sopa_letras/media/cover.png` | Desarrollo propio |
 | **Math Challenge** | [`ports/math_challenge/`](ports/math_challenge/) | `ENABLE_MATH_CHALLENGE` | `ports/math_challenge/media/cover.png` | Desarrollo propio |
+| **Ping Pong** | [`ports/ping_pong/`](ports/ping_pong/) | `ENABLE_PING_PONG` | `ports/ping_pong/media/cover.png` | Port interno (incluye 2P Wi-Fi) |
+| **Breakout** | [`ports/breakout/`](ports/breakout/) | `ENABLE_BREAKOUT` | `ports/breakout/media/cover.png` | Port interno |
+| **Space Invaders** | [`ports/space_invaders/`](ports/space_invaders/) | `ENABLE_SPACE_INVADERS` | `ports/space_invaders/media/cover.png` | Port interno |
+| **1943** | [`ports/arcade_1943/`](ports/arcade_1943/) | `ENABLE_1943` | `ports/arcade_1943/media/cover.png` | Port interno |
+| **Flappy Bird** | [`ports/flappy_bird/`](ports/flappy_bird/) | `ENABLE_FLAPPY_BIRD` | `ports/flappy_bird/media/cover.png` | Port interno |
+| **Snake** | [`ports/snake/`](ports/snake/) | `ENABLE_SNAKE` | `ports/snake/media/cover.png` | Port interno |
+| **Jump Man** | [`ports/jump_man/`](ports/jump_man/) | `ENABLE_JUMP_MAN` | `ports/jump_man/media/cover.png` | Port interno |
+| **2048** | [`ports/game_2048/`](ports/game_2048/) | `ENABLE_2048` | `ports/game_2048/media/cover.png` | Port interno |
+| **T-Rex Runner** | [`ports/trex_runner/`](ports/trex_runner/) | `ENABLE_TREX_RUNNER` | `ports/trex_runner/media/cover.png` | Port interno |
+| **Tic-Tac-Toe** | [`ports/tic_tac_toe/`](ports/tic_tac_toe/) | `ENABLE_TIC_TAC_TOE` | `ports/tic_tac_toe/media/cover.png` | Port interno |
+| **BrainduTrain** | [`ports/braindu/`](ports/braindu/) | `ENABLE_BRAINDU` | `ports/braindu/media/cover.png` | Port interno |
+| **Hangman** | [`ports/hangman/`](ports/hangman/) | `ENABLE_HANGMAN` | `ports/hangman/media/cover.png` | serisman (port Arduboy) |
+| **TRIS** | [`ports/tris/`](ports/tris/) | `ENABLE_TRIS` | `ports/tris/media/cover.png` | OBONO (port Arduboy) |
 
 Cada cartucho documenta sus controles e integración en su propio `README.md`; las
 convenciones, la plantilla y el índice están en **[`ports/README.md`](ports/README.md)**.
@@ -136,12 +149,9 @@ Convención de portadas: imagen PNG de 128×64 (1 bit o escala de grises) guarda
 `media/cover.png` dentro del cartucho. Las carpetas ya existen con su `.gitkeep`; las
 portadas se añaden en cuanto se capture la pantalla de título de cada juego.
 
-### Juegos aún integrados en el núcleo
-
-Ping Pong (incluido el modo Wi-Fi 2P), Breakout, Space Invaders, 1943, Flappy Bird,
-Snake, Jump Man, 2048, T-Rex Runner, Tic-Tac-Toe, BrainduTrain, Hangman y TRIS siguen
-en `src/main.cpp` porque comparten estado con el núcleo; están documentados como
-pendientes de extracción en [`ports/README.md`](ports/README.md).
+Todos los juegos viven ya en `ports/`; `src/main.cpp` solo conserva el núcleo
+(menú, pausa, ajustes, NVS, Wi-Fi 2P) y el diagnóstico de pines. Proyecto BLE sigue
+en el núcleo porque no es un cartucho de juego.
 
 ## 📶 Multijugador Wi-Fi 2P
 

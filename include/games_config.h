@@ -29,6 +29,17 @@
 #define ENABLE_SOPA_LETRAS
 #define ENABLE_MATH_CHALLENGE
 
-// Pendientes de extraccion a ports/ (aun en src/main.cpp):
-// #define ENABLE_PING_PONG
-// #define ENABLE_BREAKOUT
+// Juegos extraidos a ports/ en la Fase 2:
+#define ENABLE_PING_PONG
+#define ENABLE_BREAKOUT
+#define ENABLE_SPACE_INVADERS
+#define ENABLE_1943
+#define ENABLE_FLAPPY_BIRD
+#define ENABLE_SNAKE
+#define ENABLE_JUMP_MAN
+#define ENABLE_2048
+#define ENABLE_TREX_RUNNER
+#define ENABLE_TIC_TAC_TOE
+#define ENABLE_BRAINDU
+#define ENABLE_HANGMAN
+#define ENABLE_TRIS

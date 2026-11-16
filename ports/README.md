@@ -12,6 +12,9 @@ ports/<juego>/
 └── media/            portadas y capturas (se versiona con .gitkeep)
 ```
 
+Las tablas grandes (`PROGMEM`) viven en el `.cpp` y el `.h` las declara `extern`,
+para que el cartucho se pueda incluir desde más de una unidad sin duplicar flash.
+
 ## Activación
 
 `include/games_config.h` es el interruptor maestro. Comentar una macro excluye el
@@ -26,27 +29,34 @@ en tiempo de render, así que no quedan huecos.
 
 ## Ports disponibles
 
-| Port | Carpeta | Macro | Origen / licencia |
-|---|---|---|---|
-| Sea Battle | `sea_battle/` | `ENABLE_SEA_BATTLE` | Brady Heater (DarkestSpire), 2020 |
-| Trench Run | `trench_run/` | `ENABLE_TRENCH_RUN` | Lucas Cardinali — MIT |
-| Road Trip | `road_trip/` | `ENABLE_ROAD_TRIP` | Press Play on Tape — BSD 3-Clause |
-| Wolfenduino 3D | `wolfenduino_3d/` | `ENABLE_WOLFENDUINO_3D` | James Howard — MIT |
-| Cyber Escape | `cyber_escape/` | `ENABLE_CYBER_ESCAPE` | SKRTM, 2026 |
-| Sopa de Letras | `sopa_letras/` | `ENABLE_SOPA_LETRAS` | Desarrollo propio |
-| Math Challenge | `math_challenge/` | `ENABLE_MATH_CHALLENGE` | Desarrollo propio |
+| Port | Carpeta | Macro | Portada | Origen / licencia |
+|---|---|---|---|---|
+| Ping Pong | `ping_pong/` | `ENABLE_PING_PONG` | `media/cover.png` | Port interno (incluye 2P Wi-Fi) |
+| Breakout | `breakout/` | `ENABLE_BREAKOUT` | `media/cover.png` | Port interno |
+| Space Invaders | `space_invaders/` | `ENABLE_SPACE_INVADERS` | `media/cover.png` | Port interno |
+| 1943 | `arcade_1943/` | `ENABLE_1943` | `media/cover.png` | Port interno |
+| Flappy Bird | `flappy_bird/` | `ENABLE_FLAPPY_BIRD` | `media/cover.png` | Port interno |
+| Snake | `snake/` | `ENABLE_SNAKE` | `media/cover.png` | Port interno |
+| Jump Man | `jump_man/` | `ENABLE_JUMP_MAN` | `media/cover.png` | Port interno |
+| 2048 | `game_2048/` | `ENABLE_2048` | `media/cover.png` | Port interno |
+| T-Rex Runner | `trex_runner/` | `ENABLE_TREX_RUNNER` | `media/cover.png` | Port interno |
+| Tic-Tac-Toe | `tic_tac_toe/` | `ENABLE_TIC_TAC_TOE` | `media/cover.png` | Port interno |
+| BrainduTrain | `braindu/` | `ENABLE_BRAINDU` | `media/cover.png` | Port interno |
+| Hangman | `hangman/` | `ENABLE_HANGMAN` | `media/cover.png` | serisman (port Arduboy) |
+| TRIS | `tris/` | `ENABLE_TRIS` | `media/cover.png` | OBONO (port Arduboy) |
+| Sea Battle | `sea_battle/` | `ENABLE_SEA_BATTLE` | `media/cover.png` | Brady Heater (DarkestSpire), 2020 |
+| Trench Run | `trench_run/` | `ENABLE_TRENCH_RUN` | `media/cover.png` | Lucas Cardinali — MIT |
+| Road Trip | `road_trip/` | `ENABLE_ROAD_TRIP` | `media/cover.png` | Press Play on Tape — BSD 3-Clause |
+| Wolfenduino 3D | `wolfenduino_3d/` | `ENABLE_WOLFENDUINO_3D` | `media/cover.png` | James Howard — MIT |
+| Cyber Escape | `cyber_escape/` | `ENABLE_CYBER_ESCAPE` | `media/cover.png` | SKRTM, 2026 |
+| Sopa de Letras | `sopa_letras/` | `ENABLE_SOPA_LETRAS` | `media/cover.png` | Desarrollo propio |
+| Math Challenge | `math_challenge/` | `ENABLE_MATH_CHALLENGE` | `media/cover.png` | Desarrollo propio |
 
 `math_challenge` y `sopa_letras` (clase `WordSearchGame`) conservan sus nombres de
-clase originales: solo cambiaron de archivo.
+clase originales: solo cambiaron de archivo. Igual ocurre con `arcade_1943`
+(clase `AirCombatGame`) y `braindu` (clase `BrainduTrainGame`).
 
-## Pendiente de extracción
-
-Estos juegos siguen dentro de `src/main.cpp` y **no** se pueden desactivar aún:
-Ping Pong (incluido el modo Wi-Fi 2P), Breakout/Arkanoid, Space Invaders, 1943,
-Flappy Bird, Snake, Jump Man, 2048, T-Rex Runner, Tic-Tac-Toe, BrainduTrain,
-Hangman y TRIS. Sus entradas del menú son fijas y su lógica está acoplada al
-núcleo (pausa, sonido, NVS, selector). Al extraerlos, cada uno recibirá su
-carpeta aquí y su macro en `games_config.h`.
+Proyecto BLE no es un cartucho: su lógica sigue en el núcleo.
 
 ## Añadir un port nuevo
 

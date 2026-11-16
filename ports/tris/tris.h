@@ -1,0 +1,532 @@
+#pragma once
+#include "console_core.h"
+
+// =============================================================================
+// =============================================================================
+// =============================================================================
+// =============================================================================
+// =============================================================================
+// TRIS (OBONO ARDUBOY TRIS PORT - PIXEL-PERFECT 1:1 TO SCREENSHOTS)
+// =============================================================================
+#define TRIS_STATE_TITLE     0
+#define TRIS_STATE_PLAYING   1
+#define TRIS_STATE_FLASH     2
+#define TRIS_STATE_GAMEOVER  3
+
+// Pixel-perfect Title Screen (1024 bytes, Row Format for drawBitmap)
+extern const uint8_t tris_title_bitmap[1024] PROGMEM;
+
+// Pixel-perfect In-Game HUD Background (1024 bytes, Row Format for drawBitmap)
+const uint8_t tris_hud_bitmap[1024] PROGMEM = {
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x3F,0xFF,0xF8,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x0F,0xFF,0xFE,0x00,
+0x80,0x00,0x40,0x00,0x04,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x10,0x00,0x01,0x00,
+0x80,0x00,0xBF,0xFF,0xFA,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x2F,0xFF,0xFE,0x80,
+0x80,0x01,0x49,0xB3,0x1C,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5D,0x45,0x47,0x40,
+0x80,0x01,0x5B,0x55,0x3C,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5C,0x4E,0xEF,0x40,
+0x80,0x01,0x6B,0x53,0x7C,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5D,0x5E,0xEF,0x40,
+0x80,0x01,0x49,0xB5,0x1C,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5D,0x45,0x6F,0x40,
+0x80,0x00,0xBF,0xFF,0xFA,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x2F,0xFF,0xFE,0x80,
+0x80,0x00,0x40,0x00,0x04,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x10,0x00,0x01,0x00,
+0x80,0x00,0x3F,0xFF,0xF8,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x0F,0xFF,0xFE,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x81,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xF9,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x83,0xFF,0xFF,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0x00,0x00,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x83,0xFF,0xFF,0xFF,0xFF,0xF9,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x81,0xFF,0xFF,0xFF,0xFF,0xFD,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x80,0x03,0xFA,0xE4,0x6E,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x81,0x53,0x5A,0xB6,0xC7,0x55,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x80,0xAA,0x4A,0xB6,0x72,0xA9,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x81,0x55,0x42,0xE6,0xB9,0x55,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x80,0xAA,0x52,0x16,0x5C,0xA9,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0xFF,0xFE,0x80,0x00,
+0x81,0x55,0x4A,0xA6,0xAF,0x55,0x7F,0xFF,0xFF,0xFF,0xFE,0x82,0x00,0x00,0x80,0x00,
+0x80,0xAA,0x52,0xD6,0xD6,0xA9,0x7F,0xFF,0xFF,0xFF,0xFE,0x83,0xFF,0xFF,0x80,0x00,
+0x80,0x00,0x02,0xE2,0xEC,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x7F,0xFF,0xF0,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x0F,0xFF,0xFE,0x00,
+0x80,0x00,0x80,0x00,0x08,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x10,0x00,0x01,0x00,
+0x80,0x01,0x7F,0xFF,0xF4,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x2F,0xFF,0xFE,0x80,
+0x80,0x02,0xF1,0x51,0x7A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5B,0x5A,0x23,0x40,
+0x80,0x02,0xF3,0x53,0x7A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5B,0x4A,0x6F,0x40,
+0x80,0x02,0xF7,0x57,0x7A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5B,0x52,0xF3,0x40,
+0x80,0x02,0xD1,0xB1,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x58,0x5A,0x23,0x40,
+0x80,0x02,0xFF,0xFF,0xFA,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x5F,0xFF,0xFF,0x40,
+0x80,0x02,0xC0,0x00,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xC3,0x40,
+0x80,0x02,0xC0,0x00,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xD3,0x40,
+0x80,0x02,0xC0,0x00,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xD3,0x40,
+0x80,0x02,0xC0,0x00,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xD3,0x40,
+0x80,0x02,0xC0,0x00,0x3A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xD3,0x40,
+0x80,0x02,0xC0,0x00,0x1A,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x03,0xC3,0x40,
+0x80,0x01,0x7F,0xFF,0xF4,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x2F,0xFF,0xFE,0x80,
+0x80,0x00,0x80,0x00,0x08,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x10,0x00,0x01,0x00,
+0x80,0x00,0x7F,0xFF,0xF0,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x0F,0xFF,0xFE,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x01,0x7F,0xFF,0xFF,0xFF,0xFE,0x80,0x00,0x00,0x00,0x00,
+0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+};
+
+extern const uint8_t trisDigits4x6[10][6] PROGMEM;
+
+struct TrisGame {
+    uint8_t state;
+    uint8_t grid[20][10]; // 0=empty, 1..7=piece type
+    uint8_t currentPiece; // 0..6
+    uint8_t currentRot;   // 0..3
+    int8_t currentX;
+    int8_t currentY;
+    uint8_t nextPiece;    // 0..6
+
+    // 7-Bag Randomizer
+    uint8_t bag[7];
+    uint8_t bagIdx;
+
+    // Game stats
+    uint32_t score;
+    uint32_t highScore;
+    uint16_t lines;
+    uint8_t level;
+
+    // Timers & speed
+    unsigned long lastFallTime;
+    unsigned long fallInterval;
+    unsigned long flashTimer;
+    uint8_t flashCount;
+    bool flashState;
+    uint8_t linesToClear[4];
+    uint8_t numLinesToClear;
+
+    // Controls
+    bool bootActionTriggered;
+
+    // Piece shapes [piece][rot][block] -> (x, y)
+    // 0:I, 1:O, 2:T, 3:S, 4:Z, 5:J, 6:L
+    const int8_t pieceBlocks[7][4][4][2] = {
+        // 0: I
+        {
+            {{0,1},{1,1},{2,1},{3,1}},
+            {{2,0},{2,1},{2,2},{2,3}},
+            {{0,2},{1,2},{2,2},{3,2}},
+            {{1,0},{1,1},{1,2},{1,3}}
+        },
+        // 1: O
+        {
+            {{0,0},{1,0},{0,1},{1,1}},
+            {{0,0},{1,0},{0,1},{1,1}},
+            {{0,0},{1,0},{0,1},{1,1}},
+            {{0,0},{1,0},{0,1},{1,1}}
+        },
+        // 2: T
+        {
+            {{1,0},{0,1},{1,1},{2,1}},
+            {{1,0},{1,1},{2,1},{1,2}},
+            {{0,1},{1,1},{2,1},{1,2}},
+            {{1,0},{0,1},{1,1},{1,2}}
+        },
+        // 3: S
+        {
+            {{1,0},{2,0},{0,1},{1,1}},
+            {{1,0},{1,1},{2,1},{2,2}},
+            {{1,1},{2,1},{0,2},{1,2}},
+            {{0,0},{0,1},{1,1},{1,2}}
+        },
+        // 4: Z
+        {
+            {{0,0},{1,0},{1,1},{2,1}},
+            {{2,0},{1,1},{2,1},{1,2}},
+            {{0,1},{1,1},{1,2},{2,2}},
+            {{1,0},{0,1},{1,1},{0,2}}
+        },
+        // 5: J
+        {
+            {{0,0},{0,1},{1,1},{2,1}},
+            {{1,0},{2,0},{1,1},{1,2}},
+            {{0,1},{1,1},{2,1},{2,2}},
+            {{1,0},{1,1},{0,2},{1,2}}
+        },
+        // 6: L
+        {
+            {{2,0},{0,1},{1,1},{2,1}},
+            {{1,0},{1,1},{1,2},{2,2}},
+            {{0,1},{1,1},{2,1},{0,2}},
+            {{0,0},{1,0},{1,1},{1,2}}
+        }
+    };
+
+    void init() {
+        loadHighScore();
+        state = TRIS_STATE_TITLE;
+        bootActionTriggered = false;
+    }
+
+    void onBootShortPress() {
+        bootActionTriggered = true;
+    }
+
+    void loadHighScore() {
+        uint8_t h1 = EEPROM.read(60);
+        uint8_t h2 = EEPROM.read(61);
+        if (h1 != 'T' || h2 != 'R') {
+            EEPROM.write(60, 'T');
+            EEPROM.write(61, 'R');
+            highScore = 0;
+            EEPROM.put(62, highScore);
+            EEPROM.commit();
+        } else {
+            EEPROM.get(62, highScore);
+        }
+    }
+
+    void saveHighScore() {
+        if (score > highScore) {
+            highScore = score;
+            EEPROM.write(60, 'T');
+            EEPROM.write(61, 'R');
+            EEPROM.put(62, highScore);
+            EEPROM.commit();
+        }
+    }
+
+    uint8_t getNextPieceFromBag() {
+        if (bagIdx >= 7) {
+            for (uint8_t i = 0; i < 7; i++) bag[i] = i;
+            for (uint8_t i = 6; i > 0; i--) {
+                uint8_t j = random(i + 1);
+                uint8_t temp = bag[i];
+                bag[i] = bag[j];
+                bag[j] = temp;
+            }
+            bagIdx = 0;
+        }
+        return bag[bagIdx++];
+    }
+
+    void startNewGame() {
+        memset(grid, 0, sizeof(grid));
+        score = 0;
+        lines = 0;
+        level = 1;
+        updateFallInterval();
+        bagIdx = 7;
+        currentPiece = getNextPieceFromBag();
+        nextPiece = getNextPieceFromBag();
+        spawnPiece();
+        state = TRIS_STATE_PLAYING;
+        sound.tone(1200, 30);
+    }
+
+    void updateFallInterval() {
+        if (level >= 10) fallInterval = 90;
+        else fallInterval = 720 - (level - 1) * 65;
+    }
+
+    void spawnPiece() {
+        currentRot = 0;
+        currentX = 3;
+        currentY = 3;
+        lastFallTime = millis();
+
+        if (checkCollision(currentX, currentY, currentPiece, currentRot)) {
+            state = TRIS_STATE_GAMEOVER;
+            saveHighScore();
+            triggerRgbLed(255, 0, 0, 1000);
+            melodyPlayer.play(tttDefeatNotes, 4);
+        }
+    }
+
+    bool checkCollision(int8_t px, int8_t py, uint8_t piece, uint8_t rot) {
+        for (uint8_t i = 0; i < 4; i++) {
+            int8_t bx = px + pieceBlocks[piece][rot][i][0];
+            int8_t by = py + pieceBlocks[piece][rot][i][1];
+            if (bx < 0 || bx >= 10 || by >= 20) return true;
+            if (by >= 0 && grid[by][bx] != 0) return true;
+        }
+        return false;
+    }
+
+    void lockPiece() {
+        for (uint8_t i = 0; i < 4; i++) {
+            int8_t bx = currentX + pieceBlocks[currentPiece][currentRot][i][0];
+            int8_t by = currentY + pieceBlocks[currentPiece][currentRot][i][1];
+            if (by >= 0 && by < 20 && bx >= 0 && bx < 10) {
+                grid[by][bx] = currentPiece + 1;
+            }
+        }
+        sound.tone(600, 12);
+
+        numLinesToClear = 0;
+        for (int8_t r = 0; r < 20; r++) {
+            bool full = true;
+            for (int8_t c = 0; c < 10; c++) {
+                if (grid[r][c] == 0) { full = false; break; }
+            }
+            if (full) {
+                linesToClear[numLinesToClear++] = r;
+            }
+        }
+
+        if (numLinesToClear > 0) {
+            state = TRIS_STATE_FLASH;
+            flashCount = 4;
+            flashState = true;
+            flashTimer = millis();
+        } else {
+            currentPiece = nextPiece;
+            nextPiece = getNextPieceFromBag();
+            spawnPiece();
+        }
+    }
+
+    void collapseClearedLines() {
+        for (uint8_t i = 0; i < numLinesToClear; i++) {
+            uint8_t clearRow = linesToClear[i];
+            for (int8_t r = clearRow; r > 0; r--) {
+                for (int8_t c = 0; c < 10; c++) {
+                    grid[r][c] = grid[r - 1][c];
+                }
+            }
+            for (int8_t c = 0; c < 10; c++) grid[0][c] = 0;
+        }
+
+        // Puntuación: SOLO aumenta al eliminar líneas
+        if (numLinesToClear == 1) score += 100 * level;
+        else if (numLinesToClear == 2) score += 300 * level;
+        else if (numLinesToClear == 3) score += 500 * level;
+        else if (numLinesToClear >= 4) {
+            score += 800 * level;
+            triggerRgbLed(0, 255, 0, 500);
+            melodyPlayer.play(pingPongVictoryNotes, 4);
+        }
+
+        if (numLinesToClear < 4) {
+            sound.tone(880, 40);
+        }
+
+        lines += numLinesToClear;
+        level = 1 + (lines / 10);
+        updateFallInterval();
+        saveHighScore();
+
+        currentPiece = nextPiece;
+        nextPiece = getNextPieceFromBag();
+        spawnPiece();
+        state = TRIS_STATE_PLAYING;
+    }
+
+    void update() {
+        yield();
+
+        if (state == TRIS_STATE_TITLE) {
+            if (bootActionTriggered || arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) || arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+                startNewGame();
+            }
+            bootActionTriggered = false;
+            return;
+        }
+
+        if (state == TRIS_STATE_GAMEOVER) {
+            if (bootActionTriggered || arduboy.justPressed(A_BUTTON) || arduboy.justPressed(B_BUTTON) || arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(DOWN_BUTTON)) {
+                state = TRIS_STATE_TITLE;
+                sound.tone(900, 30);
+            }
+            bootActionTriggered = false;
+            return;
+        }
+
+        if (state == TRIS_STATE_FLASH) {
+            if (millis() - flashTimer >= 50) {
+                flashTimer = millis();
+                flashState = !flashState;
+                if (flashCount > 0) {
+                    flashCount--;
+                } else {
+                    collapseClearedLines();
+                }
+            }
+            bootActionTriggered = false;
+            return;
+        }
+
+        // --- MODO JUEGO ACTIVO ---
+        // Rotar
+        if (arduboy.justPressed(UP_BUTTON) || arduboy.justPressed(A_BUTTON)) {
+            uint8_t nextRot = (currentRot + 1) % 4;
+            if (!checkCollision(currentX, currentY, currentPiece, nextRot)) {
+                currentRot = nextRot; sound.tone(1400, 8);
+            } else if (!checkCollision(currentX - 1, currentY, currentPiece, nextRot)) {
+                currentX -= 1; currentRot = nextRot; sound.tone(1400, 8);
+            } else if (!checkCollision(currentX + 1, currentY, currentPiece, nextRot)) {
+                currentX += 1; currentRot = nextRot; sound.tone(1400, 8);
+            } else if (!checkCollision(currentX - 2, currentY, currentPiece, nextRot)) {
+                currentX -= 2; currentRot = nextRot; sound.tone(1400, 8);
+            } else if (!checkCollision(currentX + 2, currentY, currentPiece, nextRot)) {
+                currentX += 2; currentRot = nextRot; sound.tone(1400, 8);
+            }
+        }
+
+        // Izquierda
+        if (arduboy.justPressed(LEFT_BUTTON)) {
+            if (!checkCollision(currentX - 1, currentY, currentPiece, currentRot)) {
+                currentX--; sound.tone(1100, 8);
+            }
+        }
+
+        // Derecha
+        if (arduboy.justPressed(RIGHT_BUTTON)) {
+            if (!checkCollision(currentX + 1, currentY, currentPiece, currentRot)) {
+                currentX++; sound.tone(1100, 8);
+            }
+        }
+
+        // Soft drop: NO AUMENTA EL SCORE
+        if (arduboy.justPressed(DOWN_BUTTON)) {
+            if (!checkCollision(currentX, currentY + 1, currentPiece, currentRot)) {
+                currentY++;
+                lastFallTime = millis();
+                sound.tone(700, 8);
+            } else {
+                lockPiece();
+            }
+        }
+
+        // Gravedad
+        if (millis() - lastFallTime >= fallInterval) {
+            lastFallTime = millis();
+            if (!checkCollision(currentX, currentY + 1, currentPiece, currentRot)) {
+                currentY++;
+            } else {
+                lockPiece();
+            }
+        }
+
+        bootActionTriggered = false;
+    }
+
+    void drawNumber(uint32_t val, int16_t rightX, int16_t y, uint8_t color) {
+        char buf[12];
+        snprintf(buf, sizeof(buf), "%u", val);
+        uint8_t len = strlen(buf);
+        int16_t curX = rightX - (len * 5 - 1);
+        for (uint8_t i = 0; i < len; i++) {
+            uint8_t d = buf[i] - '0';
+            if (d <= 9) {
+                for (uint8_t row = 0; row < 6; row++) {
+                    uint8_t rowBits = pgm_read_byte(&trisDigits4x6[d][row]);
+                    for (uint8_t col = 0; col < 4; col++) {
+                        if ((rowBits >> (3 - col)) & 1) {
+                            arduboy.drawPixel(curX + col, y + row, color);
+                        }
+                    }
+                }
+            }
+            curX += 5;
+        }
+    }
+
+    void drawCell(int16_t bx, int16_t by, uint8_t type) {
+        if (type == 0) return;
+        arduboy.fillRect(bx, by, 4, 4, BLACK);
+        arduboy.drawPixel(bx + 1, by + 1, WHITE);
+        arduboy.drawPixel(bx + 2, by + 1, WHITE);
+        arduboy.drawPixel(bx + 1, by + 2, WHITE);
+    }
+
+    void drawWell() {
+        for (int8_t r = 5; r < 20; r++) {
+            bool isClearingRow = false;
+            if (state == TRIS_STATE_FLASH) {
+                for (uint8_t i = 0; i < numLinesToClear; i++) {
+                    if (linesToClear[i] == r) { isClearingRow = true; break; }
+                }
+            }
+
+            if (isClearingRow && flashState) {
+                arduboy.fillRect(49, 2 + (r - 5) * 4, 40, 4, BLACK);
+                continue;
+            }
+
+            for (int8_t c = 0; c < 10; c++) {
+                uint8_t val = grid[r][c];
+                if (val != 0) {
+                    drawCell(49 + c * 4, 2 + (r - 5) * 4, val);
+                }
+            }
+        }
+
+        if (state == TRIS_STATE_PLAYING) {
+            for (uint8_t i = 0; i < 4; i++) {
+                int8_t bx = currentX + pieceBlocks[currentPiece][currentRot][i][0];
+                int8_t by = currentY + pieceBlocks[currentPiece][currentRot][i][1];
+                if (by >= 5 && by < 20 && bx >= 0 && bx < 10) {
+                    drawCell(49 + bx * 4, 2 + (by - 5) * 4, currentPiece + 1);
+                }
+            }
+        }
+    }
+
+    void drawNextPiece() {
+        int16_t ox = 97;
+        int16_t oy = 24;
+        if (nextPiece == 0) { // I
+            ox = 95; oy = 26;
+        } else if (nextPiece == 1) { // O
+            ox = 99; oy = 24;
+        }
+        for (uint8_t i = 0; i < 4; i++) {
+            int8_t px = pieceBlocks[nextPiece][0][i][0];
+            int8_t py = pieceBlocks[nextPiece][0][i][1];
+            drawCell(ox + px * 4, oy + py * 4, nextPiece + 1);
+        }
+    }
+
+    void drawTitleScreen() {
+        arduboy.drawBitmap(0, 0, tris_title_bitmap, 128, 64, WHITE);
+        if (((millis() / 400) % 2) == 1) {
+            arduboy.fillRect(36, 42, 57, 5, BLACK);
+        }
+    }
+
+    void draw() {
+        yield();
+        if (state == TRIS_STATE_TITLE) {
+            drawTitleScreen();
+            return;
+        }
+
+        arduboy.drawBitmap(0, 0, tris_hud_bitmap, 128, 64, WHITE);
+        drawNumber(score, 39, 20, BLACK);
+        drawNumber(level, 30, 51, WHITE);
+        drawNumber(lines, 107, 51, WHITE);
+        drawNextPiece();
+        drawWell();
+
+        if (state == TRIS_STATE_GAMEOVER) {
+            arduboy.fillRect(48, 22, 40, 18, BLACK);
+            arduboy.drawRect(48, 22, 40, 18, WHITE);
+            arduboy.setTextColor(WHITE);
+            arduboy.setTextSize(1);
+            arduboy.setCursor(53, 24);
+            arduboy.print("GAME");
+            arduboy.setCursor(53, 31);
+            arduboy.print("OVER");
+        }
+    }
+};
