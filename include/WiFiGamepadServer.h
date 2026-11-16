@@ -14,6 +14,8 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>RetroArcade Gamepad</title>
 <style>
   * {
@@ -244,6 +246,8 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     }
 
     function connectWS() {
+      // iOS Safari exige resolver el host dinamicamente: la pagina puede
+      // abrirse como 192.168.4.1 o via portal cautivo con otro hostname.
       const host = window.location.hostname || "192.168.4.1";
       ws = new WebSocket("ws://" + host + ":81/");
 
@@ -410,25 +414,34 @@ public:
         WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
         WiFi.softAP("RetroArcade-ESP32", nullptr, 1, 0, 4);
 
-        // DNS Server for Captive Portal redirection
+        // DNS Server for Captive Portal redirection (resuelve * -> 192.168.4.1)
         dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
         dnsServer.start(53, "*", IPAddress(192, 168, 4, 1));
 
-        // HTTP Routes for Captive Portal and Gamepad UI
-        webServer.on("/", [this]() {
-            webServer.send_P(200, "text/html", GAMEPAD_HTML);
-        });
-        webServer.on("/hotspot-detect.html", [this]() {
-            webServer.send_P(200, "text/html", GAMEPAD_HTML);
-        });
-        webServer.on("/generate_204", [this]() {
-            webServer.send_P(200, "text/html", GAMEPAD_HTML);
-        });
-        webServer.on("/canonical.html", [this]() {
-            webServer.send_P(200, "text/html", GAMEPAD_HTML);
-        });
+        // Rutas explicitas de deteccion de portal cautivo (iOS CNA / Android /
+        // Windows). Todas sirven el gamepad para que Safari abra la pagina
+        // directamente en lugar de quedarse en blanco.
+        static const char *captivePaths[] = {
+            "/",
+            "/hotspot-detect.html",     // Apple iOS CNA
+            "/library/test/success.html", // Apple iOS CNA (variante)
+            "/generate_204",            // Android
+            "/gen_204",                 // Android (variante)
+            "/canonical.html",          // Firefox / GNOME
+            "/success.txt",             // varios
+            "/ncsi.txt",                // Windows
+            "/connecttest.txt"          // Windows 10/11
+        };
+        for (size_t i = 0; i < sizeof(captivePaths) / sizeof(captivePaths[0]); i++) {
+            webServer.on(captivePaths[i], [this]() { sendGamepadPage(); });
+        }
+
+        // Cualquier otra ruta (p.ej. /favicon.ico) redirige al gamepad.
         webServer.onNotFound([this]() {
-            webServer.send_P(200, "text/html", GAMEPAD_HTML);
+            webServer.sendHeader("Location", "http://192.168.4.1/", true);
+            webServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate", true);
+            webServer.sendHeader("Connection", "close", true);
+            webServer.send(302, "text/plain", "Redirecting to gamepad");
         });
 
         webServer.begin();
@@ -451,6 +464,17 @@ public:
         }
 
         isRunning = true;
+    }
+
+    // Sirve el HTML del gamepad con cabeceras compatibles con el portal
+    // cautivo de iOS. Safari mantiene vivas las conexiones keep-alive y
+    // cachea las respuestas de sondeo; forzamos cierre y no-cache para que
+    // 192.168.4.1 cargue siempre a la primera.
+    void sendGamepadPage() {
+        webServer.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0", true);
+        webServer.sendHeader("Pragma", "no-cache", true);
+        webServer.sendHeader("Connection", "close", true);
+        webServer.send_P(200, "text/html", GAMEPAD_HTML);
     }
 
     void stop() {
