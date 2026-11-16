@@ -168,6 +168,42 @@ Las rutas de sondeo de portal (`/hotspot-detect.html`, `/generate_204`, `/ncsi.t
 cualquier ruta desconocida redirige a `192.168.4.1`, de modo que la página carga a la
 primera en Safari, Chrome y Windows.
 
+## 🛠️ Panel de administración web y OTA
+
+Con el AP de mandos activo (**Ping Pong → 2P WiFi Gamepads**), abre
+**`http://192.168.4.1/admin`** o toca el engranaje ⚙ de la cabecera del mando web.
+
+| Ruta | Método | Función |
+|---|---|---|
+| `/admin` | GET | Panel retro responsive (HTML/CSS/JS en PROGMEM, sin internet) |
+| `/api/status` | GET | Batería (% y voltios), flash usada/libre, RAM libre y cartuchos activos |
+| `/api/settings` | GET / POST | Brillo OLED (10–100 %, contraste I2C `0x81`) y sonido on/off |
+| `/api/restart` | POST | Reinicio remoto |
+| `/update` | POST multipart | Subida de firmware `.bin` por bloques (`Update.h`) |
+
+El brillo y el sonido se aplican al instante y se guardan en NVS (`sys_cfg`), igual que
+si se cambiaran desde el menú de ajustes de la consola. Durante la OTA el OLED muestra
+`ACTUALIZANDO OTA… XX%`; al verificar el binario (`Update.end(true)`) la consola se
+reinicia sola.
+
+### Compilar el pack `.bin`
+
+```bash
+pio run -e esp32c6_super_mini            # genera .pio/build/esp32c6_super_mini/firmware.bin
+```
+
+Ese `firmware.bin` es el que se sube desde el panel. Como cada cartucho se activa con
+su macro en `include/games_config.h`, un "pack" es simplemente un build con otro
+conjunto de juegos: recompila, descarga el `.bin` y súbelo por Wi-Fi sin cable.
+
+Particiones: `platformio.ini` usa `min_spiffs.csv` (4 MB) con **dos slots OTA de
+1,9 MB** cada uno; el build completo ocupa ~1,19 MB, así que queda margen para
+cartuchos nuevos. Tras una OTA el firmware arranca del slot alterno y las preferencias
+de NVS se conservan.
+
+> La primera actualización a esta tabla de particiones debe hacerse por USB una vez
+> (`pio run -t upload`); a partir de ahí las siguientes pueden ser 100 % por aire.
+
 ## 🕹️ Controles globales
 
 | Entrada | Acción |
@@ -192,4 +228,5 @@ ArduboyTones derivan del proyecto Arduboy (MIT).
 - [x] Fase 1 — arquitectura `ports/` + `games_config.h` + documentación.
 - [ ] Portadas reales en `ports/<juego>/media/cover.png`.
 - [x] Fase 2 — extraer los 13 juegos inline de `main.cpp` a cartuchos independientes.
+- [x] Fase 3 — panel de administración web (`/admin`) y actualización OTA por Wi-Fi.
 - [ ] Añadir captura de pantalla desde la propia consola (volcado por serie).

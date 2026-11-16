@@ -34,6 +34,7 @@
   #include "../ports/sea_battle/sea_battle.h"
 #endif
 #include "WiFiGamepadServer.h"
+#include "ConsoleAdminWeb.h"
 
 // Buzzer ACTIVO: solo admite ON / MUTE (no hay volumen gradual por PWM)
 enum VolumeLevel {
@@ -842,6 +843,10 @@ void setup() {
     // Cargar y aplicar brillo de pantalla y volumen desde NVS ("sys_cfg")
     loadSystemSettings();
 
+    // Panel web de administracion + OTA: registra sus rutas en el WebServer del
+    // AP de mandos. El AP arranca solo en el modo 2P Wi-Fi de Ping Pong.
+    consoleAdmin.begin(wifiGamepads.httpServer());
+
     // Estabilización y purga de transitorios de arranque en botones
     delay(100);
     for (uint8_t i = 0; i < 5; i++) {
@@ -1117,6 +1122,12 @@ void transitionSettingsToMenu() {
 void loop() {
     yield();
 
+    // Reinicio diferido tras una OTA correcta y keep-awake durante la subida.
+    consoleAdmin.update();
+    if (consoleAdmin.isUpdating()) {
+        lastActivityTime = millis();
+    }
+
     // -------------------------------------------------------------------------
     // DIAGNÓSTICO EN TIEMPO REAL POR SERIAL (115200) - LECTURA DE CONTROLES
     // -------------------------------------------------------------------------
@@ -1141,7 +1152,7 @@ void loop() {
     // -------------------------------------------------------------------------
     // STANDBY POR SOFTWARE / SCREEN BLANKING (WAKEUP INMEDIATO SIN BUG I2C)
     // -------------------------------------------------------------------------
-    if (isScreenSleeping) {
+    if (isScreenSleeping && !consoleAdmin.isUpdating()) {
         melodyPlayer.stop();
         sound.noTone();
         // En reposo: omitir renderizado y físicas; monitorizar controles NES + D-Pad + BOOT
@@ -1794,6 +1805,8 @@ void loop() {
             arduboy.print(pauseMenuCursor == 1 ? "> Menu Consola" : "  Menu Consola");
         }
     }
+
+    if (consoleAdmin.isUpdating()) consoleAdmin.drawOverlay();
 
     arduboy.display();
 }

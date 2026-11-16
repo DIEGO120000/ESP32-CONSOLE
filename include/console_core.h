@@ -20,6 +20,7 @@ extern uint8_t sysVolume;
 extern uint8_t sysBrightness;
 
 void applyBrightness(uint8_t percent);
+void setSoundEnabled(bool on);
 void loadSystemSettings();
 void saveSystemSettings();
 

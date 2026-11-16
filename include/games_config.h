@@ -15,10 +15,8 @@
 // Los ports viven en ports/<juego>/ como paquetes autocontenidos
 // (.h + .cpp + README.md + media/). Ver ports/README.md.
 //
-// NOTA: los juegos que aun viven dentro de src/main.cpp (Ping Pong, Breakout,
-// Space Invaders, 1943, Flappy Bird, Snake, Jump Man, 2048, T-Rex, Tic-Tac-Toe,
-// BrainduTrain, Hangman y TRIS) NO se pueden desactivar todavia: su logica esta
-// acoplada al nucleo. Se activaran aqui cuando se extraigan a ports/.
+// Todos los juegos viven ya en ports/ y son desactivables desde aqui. Proyecto
+// BLE no es un cartucho: sigue en el nucleo (src/main.cpp) sin macro.
 // =============================================================================
 
 #define ENABLE_SEA_BATTLE

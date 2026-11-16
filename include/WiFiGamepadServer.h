@@ -85,6 +85,29 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     background: rgba(255, 200, 0, 0.2);
     color: #ffd000;
   }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .admin-link {
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    border: 1px solid #262c45;
+    background: #151928;
+    color: #6b7899;
+    font-size: 14px;
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .admin-link:hover, .admin-link:active {
+    color: #00f0ff;
+    border-color: #00f0ff;
+  }
   .pad-container {
     flex: 1;
     min-height: 0;
@@ -189,7 +212,10 @@ static const char GAMEPAD_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <body id="body">
   <header>
     <div class="title">PING PONG 2.42"</div>
-    <div id="statusBadge" class="badge connecting">CONECTANDO...</div>
+    <div class="header-right">
+      <div id="statusBadge" class="badge connecting">CONECTANDO...</div>
+      <a class="admin-link" href="/admin" title="Panel de administracion" aria-label="Administracion">&#9881;</a>
+    </div>
   </header>
   <div class="pad-container">
     <div id="btnUp" class="touch-btn">
@@ -407,6 +433,10 @@ private:
     WiFiServer wsServer{81};
 
 public:
+    // WebServer del AP: lo usa ConsoleAdminWeb (panel /admin + OTA) para
+    // registrar sus rutas sin abrir el resto de la implementacion.
+    WebServer &httpServer() { return webServer; }
+
     void begin() {
         if (isRunning) return;
 
