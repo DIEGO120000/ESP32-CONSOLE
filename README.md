@@ -1,78 +1,185 @@
-# ESP32-CONSOLE
+# 🕹️ Consola Retro ESP32-C6 · OLED 2.42"
 
-Consola de videojuegos retro y emulador Arduboy / mini juegos para microcontrolador ESP32 / ESP32-C6 Super Mini.
+Consola portátil de videojuegos retro basada en **ESP32-C6 Super Mini** con pantalla
+**OLED SSD1309 de 2.42" (128×64, I2C)**, pensada como plataforma de cartuchos
+intercambiables: el mismo firmware aloja emulación estilo **Arduboy**, juegos propios y
+**multijugador local por Wi-Fi** con mandos web servidos desde la propia consola
+(portal cautivo compatible con iOS y Android).
 
-## 🚀 Características
-- **Plataforma:** ESP32-C6 (PlatformIO / Arduino Framework)
-- **Pantalla:** OLED SSD1306 128x64 (I2C)
-- **Audio & Melodías:** Sintetizador de tonos y buzzer (GPIO 1) / ArduboyTones
-- **LED RGB:** WS2812 integrado (GPIO 8)
-- **Conectividad:** BLE (Bluetooth Low Energy)
-- **Juegos y Roms:** Emulación y juegos retro integrados (Ping Pong, Breakout, Space Invaders, etc.)
+```
+┌─────────────────────────────┐
+│  ESP32-C6 Super Mini        │
+│  ┌───────────────────────┐  │   OLED SSD1309 2.42" 128x64 (I2C 400 kHz)
+│  │   MENU                │  │   Cruceta 5 vías + A/B
+│  │ 1. Sea Battle         │  │   Buzzer activo + LED RGB WS2812
+│  │ 2. Trench Run         │  │   Batería Li-Ion con telemetría ADC
+│  │ ...                   │  │   Wi-Fi AP + portal cautivo
+│  └───────────────────────┘  │
+└─────────────────────────────┘
+```
 
-## 🛠️ Requisitos y Compilación
-Este proyecto está configurado para [PlatformIO](https://platformio.org/).
+## ✨ Características
 
-### Compilar y subir firmware:
+- **Arquitectura modular por cartuchos**: cada juego es un paquete independiente en
+  `ports/<juego>/` con su `.h`, `.cpp`, assets, README y `media/`. El núcleo (HAL,
+  menú, pausa, ajustes, NVS, audio, Wi-Fi) vive en `src/` e `include/`.
+- **Interruptor maestro de cartuchos**: `include/games_config.h` permite compilar el
+  firmware sin los juegos que no quieras. Los `#ifdef` cubren include, instancia,
+  estado, menú, pausa y dibujado, y la numeración del menú se calcula en el render,
+  así que desactivar un cartucho no deja huecos ni rompe la navegación.
+- **Compatible con la API de Arduboy**: `Arduboy2`, `Arduboy2Core` y `ArduboyTones`
+  sobre el framebuffer de 1 bit y el hardware real (`drawBitmap`, `Sprites`, `tone`).
+- **Multijugador local Wi-Fi 2P**: la consola levanta un AP (`RetroArcade-ESP32`) con
+  portal cautivo; cada jugador abre un mando en su móvil y juega desde el navegador.
+- **Menú dinámico, pausa universal y ajustes persistentes** (brillo, sonido, batería)
+  guardados en NVS con `Preferences`.
+- **Telemetría de batería Li-Ion** por ADC con divisor 100k/100k y aviso de carga baja.
+- **BLE** disponible para gamepad/experimentos (`ProyectoBLE.h`).
+
+## 🔌 Hardware y pinout
+
+Placa: **ESP32-C6 Super Mini**. Pantalla: **SSD1309/SSD1306 2.42" 128×64**, I2C a
+400 kHz, dirección autodetectada (`0x3C` o `0x3D`).
+
+| Función | GPIO | Definición en `include/Arduboy2Core.h` | Notas |
+|---|---:|---|---|
+| OLED SDA | **7** | `ARDUBOY_PIN_SDA` | Bus I2C exclusivo de la pantalla |
+| OLED SCL | **6** | `ARDUBOY_PIN_SCL` | 400 kHz |
+| Cruceta arriba | **14** | `ARDUBOY_PIN_UP` | `INPUT_PULLUP`, activo a LOW |
+| Cruceta abajo | **18** | `ARDUBOY_PIN_DOWN` | `INPUT_PULLUP`, activo a LOW |
+| Cruceta derecha | **19** | `ARDUBOY_PIN_RIGHT` | `INPUT_PULLUP`, activo a LOW |
+| Cruceta izquierda | **5** | `ARDUBOY_PIN_LEFT` | `INPUT_PULLUP`, activo a LOW |
+| Cruceta centro (click) | **20** | `ARDUBOY_PIN_SELECT` / `PIN_NAV_CENTER` | Abre ajustes / confirma |
+| Botón A | **3** | `PIN_BUTTON_A` | Seleccionar / OK / acción |
+| Botón B | **4** | `PIN_BUTTON_B` | Volver / pausa universal / salir |
+| BOOT integrado | **9** | `ARDUBOY_PIN_BOOT` | Activo a LOW, atajo contextual |
+| Buzzer | **1** | `ARDUBOY_PIN_BUZZER` | LEDC / `ArduboyTones` |
+| LED RGB WS2812 | **8** | — | Estado, notificaciones y feedback |
+| ADC batería | **2** | `ARDUBOY_PIN_BATTERY` | ADC1_CH2, divisor 1:2 (100k/100k) |
+
+> ⚠️ Los pines del bus I2C y de la cruceta son fijos: la HAL los configura al arrancar
+> y ningún cartucho debe reconfigurarlos.
+
+## 🧱 Estructura del repositorio
+
+```
+├── platformio.ini            entorno esp32c6_super_mini
+├── include/
+│   ├── Arduboy2Core.h        HAL: GPIO, I2C, botones, framebuffer
+│   ├── Arduboy2.h/.cpp       API estilo Arduboy (texto, bitmaps, sprites)
+│   ├── ArduboyTones.h/.cpp   motor de audio
+│   ├── WiFiGamepadServer.h   AP + portal cautivo + WebSocket :81
+│   └── games_config.h        ⭐ interruptor maestro de cartuchos
+├── src/
+│   ├── main.cpp              núcleo: menú, estados, pausa, ajustes, juegos inline
+│   ├── Arduboy2.cpp ...
+├── ports/                    catálogo de cartuchos (ver ports/README.md)
+│   └── <juego>/  <juego>.h  <juego>.cpp  *_assets.h  README.md  media/
+└── flash_*.sh                scripts de flasheo
+```
+
+## 🛠️ Compilación y flasheo
+
+Requiere [PlatformIO](https://platformio.org/) (CLI o extensión de VS Code) y el
+entorno `esp32c6_super_mini` del `platformio.ini`.
+
 ```bash
 # Compilar
-pio run
+pio run -e esp32c6_super_mini
 
-# Flashear en ESP32-C6
-pio run --target upload
+# Compilar y flashear (puerto USB de la consola)
+pio run -e esp32c6_super_mini -t upload --upload-port /dev/ttyACM0
+
+# Monitor serie a 115200 baudios
+pio device monitor -e esp32c6_super_mini --port /dev/ttyACM0
 ```
 
-### Scripts de Flasheo:
-Incluye scripts de utilidad para flasheo automático y configuración rápida en ESP32-C6 / Super Mini:
-- `./flash_esp32c6.sh`
-- `./flash_auto.sh`
-- `./flash_direct.sh`
+En Windows/macOS el puerto cambia (`COM5`, `/dev/cu.usbmodem*`). La placa expone un
+único puerto USB-CDC/JTAG; no hay `/dev/ttyACM1` salvo que conectes otra placa. Si el
+puerto está ocupado por el monitor serie, ciérralo antes de flashear. Tras el flasheo
+el firmware arranca solo (*hard reset* por RTS).
 
-## 🧩 Arquitectura modular (cartuchos)
+Diagnóstico de compilación de referencia con todos los cartuchos activos: **RAM 27 %**,
+**Flash 88 %** de 1,25 MB.
 
-El proyecto separa el **núcleo de la consola** del **catálogo de juegos**:
+## 🎛️ Activar y desactivar cartuchos
 
-```
-src/                    núcleo: main.cpp, HAL (Arduboy2Core), audio, Wi-Fi 2P, BLE
-include/                cabeceras del núcleo + games_config.h (interruptor maestro)
-ports/<juego>/          un paquete autocontenido por juego
-  <juego>.h  <juego>.cpp  <juego>_assets.h  README.md  media/
-```
-
-`platformio.ini` compila ambas zonas con:
-
-```ini
-build_src_filter = +<*> +<../ports/>
-```
-
-### Activar o desactivar juegos
-
-Edita `include/games_config.h` y comenta la macro del port que no quieras en el
-binario. Su include, instancia, estado, entrada del menú, pausa y dibujado se
-compilan bajo el mismo `#ifdef`, y la numeración del menú se recalcula sola:
+Edita `include/games_config.h`:
 
 ```cpp
 #define ENABLE_SEA_BATTLE
-// #define ENABLE_WOLFENDUINO_3D   // excluido: libera ~800 KB de flash
+#define ENABLE_TRENCH_RUN
+// #define ENABLE_WOLFENDUINO_3D   // comentado: fuera del binario
 ```
 
-### Ports incluidos
+Comentar una macro elimina del build su código, su entrada de menú y su estado; los
+números del menú se recalculan solos. Es la forma recomendada de liberar flash (el
+motor de Wolfenstein 3D con sus assets ocupa la mayor parte del binario) sin tocar
+ningún juego.
 
-| Port | Macro | Origen / licencia |
-|---|---|---|
-| Sea Battle | `ENABLE_SEA_BATTLE` | Brady Heater (DarkestSpire), 2020 |
-| Trench Run | `ENABLE_TRENCH_RUN` | Lucas Cardinali — MIT |
-| Road Trip | `ENABLE_ROAD_TRIP` | Press Play on Tape — BSD 3-Clause |
-| Wolfenduino 3D | `ENABLE_WOLFENDUINO_3D` | James Howard — MIT |
-| Cyber Escape | `ENABLE_CYBER_ESCAPE` | SKRTM, 2026 |
-| Sopa de Letras | `ENABLE_SOPA_LETRAS` | Desarrollo propio |
-| Math Challenge | `ENABLE_MATH_CHALLENGE` | Desarrollo propio |
+## 🎮 Catálogo de cartuchos
 
-Detalles de cada cartucho, controles y guía para añadir uno nuevo: [`ports/README.md`](ports/README.md).
+| Cartucho | Carpeta | Macro | Portada | Origen / licencia |
+|---|---|---|---|---|
+| **Sea Battle** | [`ports/sea_battle/`](ports/sea_battle/) | `ENABLE_SEA_BATTLE` | `ports/sea_battle/media/cover.png` | Brady Heater (DarkestSpire), 2020 |
+| **Trench Run** | [`ports/trench_run/`](ports/trench_run/) | `ENABLE_TRENCH_RUN` | `ports/trench_run/media/cover.png` | Lucas Cardinali — MIT |
+| **Road Trip** | [`ports/road_trip/`](ports/road_trip/) | `ENABLE_ROAD_TRIP` | `ports/road_trip/media/cover.png` | Press Play on Tape — BSD 3-Clause |
+| **Wolfenduino 3D** | [`ports/wolfenduino_3d/`](ports/wolfenduino_3d/) | `ENABLE_WOLFENDUINO_3D` | `ports/wolfenduino_3d/media/cover.png` | James Howard — MIT |
+| **Cyber Escape** | [`ports/cyber_escape/`](ports/cyber_escape/) | `ENABLE_CYBER_ESCAPE` | `ports/cyber_escape/media/cover.png` | SKRTM, 2026 |
+| **Sopa de Letras** | [`ports/sopa_letras/`](ports/sopa_letras/) | `ENABLE_SOPA_LETRAS` | `ports/sopa_letras/media/cover.png` | Desarrollo propio |
+| **Math Challenge** | [`ports/math_challenge/`](ports/math_challenge/) | `ENABLE_MATH_CHALLENGE` | `ports/math_challenge/media/cover.png` | Desarrollo propio |
 
-### Pendiente de extracción
+Cada cartucho documenta sus controles e integración en su propio `README.md`; las
+convenciones, la plantilla y el índice están en **[`ports/README.md`](ports/README.md)**.
 
-Ping Pong (con su modo Wi-Fi 2P), Breakout, Space Invaders, 1943, Flappy Bird,
-Snake, Jump Man, 2048, T-Rex Runner, Tic-Tac-Toe, BrainduTrain, Hangman y TRIS
-siguen dentro de `src/main.cpp` y todavía no se pueden desactivar desde
-`games_config.h`.
+Convención de portadas: imagen PNG de 128×64 (1 bit o escala de grises) guardada como
+`media/cover.png` dentro del cartucho. Las carpetas ya existen con su `.gitkeep`; las
+portadas se añaden en cuanto se capture la pantalla de título de cada juego.
+
+### Juegos aún integrados en el núcleo
+
+Ping Pong (incluido el modo Wi-Fi 2P), Breakout, Space Invaders, 1943, Flappy Bird,
+Snake, Jump Man, 2048, T-Rex Runner, Tic-Tac-Toe, BrainduTrain, Hangman y TRIS siguen
+en `src/main.cpp` porque comparten estado con el núcleo; están documentados como
+pendientes de extracción en [`ports/README.md`](ports/README.md).
+
+## 📶 Multijugador Wi-Fi 2P
+
+1. En el menú abre **Ping Pong → 3. 2P WiFi Gamepads**.
+2. La consola crea el AP **`RetroArcade-ESP32`** (sin contraseña) y el portal cautivo.
+3. Cada jugador conecta su móvil y abre el mando: iOS y Android muestran la página
+   automáticamente; si no, entra en **`http://192.168.4.1`**.
+4. Jugador 1 usa el mando web **o** la cruceta física; el jugador 2, solo el mando web.
+5. El WebSocket escucha en el puerto **81** y resuelve el host dinámicamente para
+   funcionar tanto por IP como por el nombre del portal.
+
+Las rutas de sondeo de portal (`/hotspot-detect.html`, `/generate_204`, `/ncsi.txt`,
+`/connecttest.txt`, `/success.txt`, …) sirven el gamepad con cabeceras `no-store`, y
+cualquier ruta desconocida redirige a `192.168.4.1`, de modo que la página carga a la
+primera en Safari, Chrome y Windows.
+
+## 🕹️ Controles globales
+
+| Entrada | Acción |
+|---|---|
+| B | Pausa universal / volver / salir al menú (según contexto) |
+| Click central | Menú de ajustes de la consola |
+| A + B | Salir del juego al menú de la consola |
+| BOOT (corto) | Atajo contextual (salir, confirmar, despertar) |
+| BOOT (largo) | Apagado / deep sleep |
+
+Cada juego puede sobrescribir estos atajos en su propio `README.md`.
+
+## 📄 Créditos y licencias
+
+El núcleo y los juegos propios son de este repositorio. Los ports conservan la
+licencia de sus autores originales, incluida en cada carpeta
+(`trench_run_LICENSE.txt`, cabeceras MIT/BSD en los fuentes). Arduboy2, Arduboy2Core y
+ArduboyTones derivan del proyecto Arduboy (MIT).
+
+## 🗺️ Roadmap
+
+- [x] Fase 1 — arquitectura `ports/` + `games_config.h` + documentación.
+- [ ] Portadas reales en `ports/<juego>/media/cover.png`.
+- [ ] Extraer los juegos inline de `main.cpp` a cartuchos independientes.
+- [ ] Añadir captura de pantalla desde la propia consola (volcado por serie).
