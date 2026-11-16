@@ -62,9 +62,10 @@ uint16_t time_ms()
 uint8_t poll_btns()
 {
     // Mismos bits que UP_BUTTON/DOWN_BUTTON/LEFT_BUTTON/RIGHT_BUTTON/A_BUTTON/B_BUTTON.
-    // Se lee el estado que main.cpp ya muestreo en este frame (nextFrame) para
-    // que el juego vea exactamente los mismos botones que el menu de consola.
-    return ::Arduboy2Core::currentButtonState;
+    // IMPORTANTE: `arduboy` (instancia Arduboy2) es quien recibe pollButtons()
+    // en nextFrame(); `Arduboy2Core::currentButtonState` (estatico) NUNCA se
+    // actualiza y siempre vale 0, lo que bloqueaba toda entrada del juego.
+    return ::arduboy.currentButtonState;
 }
 
 // -----------------------------------------------------------------------------

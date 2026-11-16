@@ -1111,7 +1111,7 @@ void drawMainMenuScreen() {
     // Bottom Navigation Bar
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(2, 57);
-    arduboy.print("A:JUGAR | <LEFT:AJUSTES");
+    arduboy.print("A:JUGAR | RIGHT:AJUSTES");
 }
 
 void drawSettingsScreen() {
@@ -1181,7 +1181,7 @@ void drawSettingsScreen() {
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    arduboy.print("B:SALIR | A:CAMBIAR");
+    arduboy.print("B:-/OFF  A:+/ON  <:SALIR");
 }
 
 // Pantalla del AP de configuracion (Ajustes -> CONFIG WEB).
@@ -1595,8 +1595,8 @@ void loop() {
                     menuCursor = menuStepVisible((uint8_t)menuCursor, +1);
                 }
 
-                // Transición de deslizamiento horizontal hacia Ajustes al pulsar LEFT
-                if (arduboy.justPressed(LEFT_BUTTON)) {
+                // Transición de deslizamiento horizontal hacia Ajustes al pulsar RIGHT
+                if (arduboy.justPressed(RIGHT_BUTTON)) {
                     transitionMenuToSettings();
                     break;
                 }
@@ -1923,13 +1923,13 @@ void loop() {
         case STATE_SETTINGS: {
             drawSettingsScreen();
 
-            // Regreso con animación de deslizamiento hacia el Menú al pulsar RIGHT
-            if (arduboy.justPressed(RIGHT_BUTTON)) {
+            // Regreso al carrusel con animación de deslizamiento al pulsar LEFT
+            if (arduboy.justPressed(LEFT_BUTTON)) {
                 transitionSettingsToMenu();
                 break;
             }
 
-            // Navegación Vertical entre opciones con UP y DOWN (4 elementos en carrusel)
+            // Navegación Vertical entre opciones con UP y DOWN
             if (arduboy.justPressed(UP_BUTTON)) {
                 sound.tone(880, 15);
                 settingsCursor--;
@@ -1941,14 +1941,8 @@ void loop() {
                 if (settingsCursor > 3) settingsCursor = 0;
             }
 
-            // Botón B (GPIO 4): salir de Ajustes al menú principal
+            // DISMINUIR / DESACTIVAR con Botón B (GPIO 4)
             if (arduboy.justPressed(B_BUTTON)) {
-                transitionSettingsToMenu();
-                break;
-            }
-
-            // DISMINUIR con cruceta LEFT
-            if (arduboy.justPressed(LEFT_BUTTON)) {
                 if (settingsCursor == 0) {
                     if (sysBrightness > 10) {
                         applyBrightness(sysBrightness - 10);
@@ -1963,7 +1957,7 @@ void loop() {
                 }
             }
 
-            // AUMENTAR / SELECCIONAR con Botón A (GPIO 3)
+            // AUMENTAR / ACTIVAR / SELECCIONAR con Botón A (GPIO 3)
             if (arduboy.justPressed(A_BUTTON)) {
                 if (settingsCursor == 0) {
                     if (sysBrightness < 100) {
