@@ -40,6 +40,7 @@ private:
     bool _uploadOk = false;
     String _uploadError;
     uint8_t _progress = 0;
+    size_t _bodyTotal = 0; // Content-Length del multipart (para el porcentaje)
     unsigned long _restartAt = 0;
 
     void handleAdminPage();

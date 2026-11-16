@@ -639,6 +639,7 @@ void ConsoleAdminWeb::handleOtaUpload() {
         _progress = 0;
         _restartAt = 0;
         _updating = true;
+        _bodyTotal = (size_t)_server->header("Content-Length").toInt();
 
         melodyPlayer.stop();
         sound.noTone();
@@ -665,9 +666,14 @@ void ConsoleAdminWeb::handleOtaUpload() {
             Serial.printf("[OTA] Error de escritura: %s\n", _uploadError.c_str());
             return;
         }
-        const size_t total = Update.size();
+        // Update.size() es el tamano de la particion cuando se usa
+        // UPDATE_SIZE_UNKNOWN; para el porcentaje real usamos el
+        // Content-Length del multipart y dejamos el 100% para Update.end().
+        size_t total = _bodyTotal;
+        if (total == 0) total = Update.size();
         if (total > 0) {
-            _progress = (uint8_t)((Update.progress() * 100ULL) / total);
+            unsigned long pct = (Update.progress() * 100ULL) / total;
+            _progress = (uint8_t)(pct > 99 ? 99 : pct);
         }
     } else if (up.status == UPLOAD_FILE_END) {
         if (_updating) {
