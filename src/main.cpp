@@ -27,6 +27,9 @@
 #ifdef ENABLE_WOLFENDUINO_3D
   #include "../ports/wolfenduino_3d/wolfenstein.h"
 #endif
+#ifdef ENABLE_CATACOMBS_3D
+  #include "../ports/catacombs_3d/catacombs_3d.h"
+#endif
 #ifdef ENABLE_CYBER_ESCAPE
   #include "../ports/cyber_escape/cyber_escape.h"
 #endif
@@ -300,6 +303,9 @@ RoadTripGame roadTrip;
 #ifdef ENABLE_WOLFENDUINO_3D
 WolfensteinGame wolfenstein;
 #endif
+#ifdef ENABLE_CATACOMBS_3D
+Catacombs3DGame catacombs3D;
+#endif
 #ifdef ENABLE_CYBER_ESCAPE
 CyberEscapeGame cyberEscape;
 #endif
@@ -345,6 +351,9 @@ enum SystemState {
 #endif
 #ifdef ENABLE_WOLFENDUINO_3D
     STATE_WOLFENSTEIN,
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+    STATE_CATACOMBS,
 #endif
 #ifdef ENABLE_CYBER_ESCAPE
     STATE_CYBER_ESCAPE,
@@ -433,6 +442,9 @@ const MenuEntry menuEntries[] = {
 #endif
 #ifdef ENABLE_SEA_BATTLE
     { "Sea Battle",         STATE_SEA_BATTLE },
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+    { "Catacombs 3D",       STATE_CATACOMBS },
 #endif
     { "Test Pines Cruceta", STATE_PIN_DIAGNOSTIC }
 };
@@ -618,6 +630,11 @@ bool isCurrentGameActive() {
             return wolfenstein.isPlaying();
 #endif
 
+#ifdef ENABLE_CATACOMBS_3D
+        case STATE_CATACOMBS:
+            return catacombs3D.isPlaying();
+#endif
+
 #ifdef ENABLE_CYBER_ESCAPE
         case STATE_CYBER_ESCAPE:
             return cyberEscape.isPlaying();
@@ -691,6 +708,10 @@ bool currentGameHasSubmenu() {
 #endif
 #ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:
+            return true;
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+        case STATE_CATACOMBS:
             return true;
 #endif
 #ifdef ENABLE_CYBER_ESCAPE
@@ -769,6 +790,11 @@ void returnToCurrentGameSubmenu() {
             wolfenstein.init();
             break;
 #endif
+#ifdef ENABLE_CATACOMBS_3D
+        case STATE_CATACOMBS:
+            catacombs3D.init();
+            break;
+#endif
 #ifdef ENABLE_CYBER_ESCAPE
         case STATE_CYBER_ESCAPE:
             cyberEscape.init();
@@ -817,6 +843,10 @@ void exitCurrentGameToMainMenu() {
 #ifdef ENABLE_EIGHTEEN_HOLES
     } else if (currentState == STATE_EIGHTEEN_HOLES) {
         eighteenHoles.init();
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+    } else if (currentState == STATE_CATACOMBS) {
+        catacombs3D.init();
 #endif
     }
     melodyPlayer.stop();
@@ -1045,6 +1075,9 @@ void launchSelectedGame() {
 #endif
 #ifdef ENABLE_WOLFENDUINO_3D
         case STATE_WOLFENSTEIN:    wolfenstein.init();  break;
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+        case STATE_CATACOMBS:      catacombs3D.init();  break;
 #endif
 #ifdef ENABLE_CYBER_ESCAPE
         case STATE_CYBER_ESCAPE:   cyberEscape.init();  break;
@@ -1538,6 +1571,10 @@ void loop() {
 #ifdef ENABLE_WOLFENDUINO_3D
         && currentState != STATE_WOLFENSTEIN
 #endif
+#ifdef ENABLE_CATACOMBS_3D
+        // En Catacombs A dispara y B pausa: el combo A+B no debe salir al menu.
+        && currentState != STATE_CATACOMBS
+#endif
 #ifdef ENABLE_CYBER_ESCAPE
         && currentState != STATE_CYBER_ESCAPE
 #endif
@@ -1761,6 +1798,17 @@ void loop() {
             wolfenstein.draw();
             if (wolfenstein.exitRequested) {
                 wolfenstein.exitRequested = false;
+                currentState = STATE_MENU;
+            }
+            break;
+#endif
+
+#ifdef ENABLE_CATACOMBS_3D
+        case STATE_CATACOMBS:
+            if (allowGameUpdate) catacombs3D.update();
+            catacombs3D.draw();
+            if (catacombs3D.exitRequested) {
+                catacombs3D.exitRequested = false;
                 currentState = STATE_MENU;
             }
             break;

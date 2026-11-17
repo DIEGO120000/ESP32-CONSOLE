@@ -132,6 +132,7 @@ y subir el nuevo `.bin` por OTA (ver más abajo).
 | **Trench Run** | [`ports/trench_run/`](ports/trench_run/) | `ENABLE_TRENCH_RUN` | `ports/trench_run/media/cover.png` | Lucas Cardinali — MIT |
 | **Road Trip** | [`ports/road_trip/`](ports/road_trip/) | `ENABLE_ROAD_TRIP` | `ports/road_trip/media/cover.png` | Press Play on Tape — BSD 3-Clause |
 | **Wolfenduino 3D** | [`ports/wolfenduino_3d/`](ports/wolfenduino_3d/) | `ENABLE_WOLFENDUINO_3D` | `ports/wolfenduino_3d/media/cover.png` | James Howard — MIT |
+| **Catacombs 3D** | [`ports/catacombs_3d/`](ports/catacombs_3d/) | `ENABLE_CATACOMBS_3D` | `ports/catacombs_3d/media/cover.png` | James Howard (jhhoward/Arduboy3D) — MIT |
 | **Cyber Escape** | [`ports/cyber_escape/`](ports/cyber_escape/) | `ENABLE_CYBER_ESCAPE` | `ports/cyber_escape/media/cover.png` | SKRTM, 2026 |
 | **Sopa de Letras** | [`ports/sopa_letras/`](ports/sopa_letras/) | `ENABLE_SOPA_LETRAS` | `ports/sopa_letras/media/cover.png` | Desarrollo propio |
 | **Math Challenge** | [`ports/math_challenge/`](ports/math_challenge/) | `ENABLE_MATH_CHALLENGE` | `ports/math_challenge/media/cover.png` | Desarrollo propio |

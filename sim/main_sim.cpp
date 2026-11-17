@@ -50,6 +50,9 @@
 #include "../ports/eighteen_holes/eighteen_holes.h"
 #endif
 #include "../ports/wolfenduino_3d/wolfenstein.h"
+#ifdef ENABLE_CATACOMBS_3D
+#include "../ports/catacombs_3d/catacombs_3d.h"
+#endif
 
 // =============================================================================
 // NUCLEO SIMULADO (lo que en el firmware vive en main.cpp/console_core)
@@ -81,6 +84,9 @@ WordSearchGame wordSearchGame;
 TrenchRunGame trenchRun;
 RoadTripGame roadTrip;
 WolfensteinGame wolfenstein;
+#ifdef ENABLE_CATACOMBS_3D
+Catacombs3DGame catacombs3D;
+#endif
 CyberEscapeGame cyberEscape;
 SeaBattleGame seaBattle;
 
@@ -269,6 +275,9 @@ static const SimEntry simMenu[] = {
 #endif
 #ifdef ENABLE_SEA_BATTLE
     {"Sea Battle", [] { seaBattle.init(); }, [] { seaBattle.update(); }, [] { seaBattle.draw(); }, &seaBattle.exitRequested},
+#endif
+#ifdef ENABLE_CATACOMBS_3D
+    {"Catacombs 3D", [] { catacombs3D.init(); }, [] { catacombs3D.update(); }, [] { catacombs3D.draw(); }, &catacombs3D.exitRequested},
 #endif
 };
 

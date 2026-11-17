@@ -49,6 +49,7 @@ en tiempo de render, así que no quedan huecos.
 | Trench Run | `trench_run/` | `ENABLE_TRENCH_RUN` | `media/cover.png` | Lucas Cardinali — MIT |
 | Road Trip | `road_trip/` | `ENABLE_ROAD_TRIP` | `media/cover.png` | Press Play on Tape — BSD 3-Clause |
 | Wolfenduino 3D | `wolfenduino_3d/` | `ENABLE_WOLFENDUINO_3D` | `media/cover.png` | James Howard — MIT |
+| Catacombs 3D | `catacombs_3d/` | `ENABLE_CATACOMBS_3D` | `media/cover.png` | James Howard (jhhoward/Arduboy3D) — MIT |
 | Cyber Escape | `cyber_escape/` | `ENABLE_CYBER_ESCAPE` | `media/cover.png` | SKRTM, 2026 |
 | Sopa de Letras | `sopa_letras/` | `ENABLE_SOPA_LETRAS` | `media/cover.png` | Desarrollo propio |
 | Math Challenge | `math_challenge/` | `ENABLE_MATH_CHALLENGE` | `media/cover.png` | Desarrollo propio |
