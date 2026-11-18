@@ -75,7 +75,14 @@ void loadSystemSettings() {
         sysBrightness = prefs.getUChar("brightness", 80);
         sysVolume = prefs.getUChar("volume", VOL_ON);
         menuVisibleMask = prefs.getUInt("games_mask", 0xFFFFFFFFUL);
+        // "games_cnt" = cartuchos que existian al guardar la mascara. Los
+        // cartuchos anadidos despues de esa fecha entran visibles por defecto,
+        // en vez de quedar ocultos por un bit que nadie pulso.
+        const uint8_t savedCount = prefs.getUChar("games_cnt", menuGameCount());
         prefs.end();
+        for (uint8_t i = savedCount; i < menuGameCount() && i < 32; i++) {
+            menuVisibleMask |= (1UL << i);
+        }
     } else {
         sysBrightness = 80;
         sysVolume = VOL_ON;
@@ -95,6 +102,7 @@ void saveSystemSettings() {
         prefs.putUChar("brightness", sysBrightness);
         prefs.putUChar("volume", sysVolume);
         prefs.putUInt("games_mask", menuVisibleMask);
+        prefs.putUChar("games_cnt", menuGameCount());
         prefs.end();
     }
 }
