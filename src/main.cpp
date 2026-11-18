@@ -39,14 +39,22 @@
 #include "WiFiGamepadServer.h"
 #include "ConsoleAdminWeb.h"
 
-// Buzzer ACTIVO: solo admite ON / MUTE (no hay volumen gradual por PWM)
-enum VolumeLevel {
+// Altavoz magnetico 8 ohm via NPN 2N2222 en GPIO 1: la nota sale del PWM
+// (frecuencia) y el volumen del ciclo de trabajo (5 %..45 %).
+// Escala de pasos: MUTE, 20 %, 40 %, 60 %, 80 %, 100 %.
+enum VolumeLevel : uint8_t {
     VOL_MUTE = 0,
-    VOL_ON
+    VOL_20,
+    VOL_40,
+    VOL_60,
+    VOL_80,
+    VOL_100,
+    VOL_STEPS
 };
 
-uint8_t sysVolume = VOL_ON;
-const char* const volumeLabels[] = {"MUTE", "ON"};
+uint8_t sysVolume = VOL_60;
+uint8_t lastAudibleVolume = VOL_60; // se restaura al reactivar desde el panel web
+const char* const volumeLabels[VOL_STEPS] = {"MUTE", "20%", "40%", "60%", "80%", "100%"};
 
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
@@ -69,11 +77,44 @@ void applyBrightness(uint8_t percent) {
     Arduboy2Core::setContrast(contrastVal);
 }
 
+void saveSystemSettings();
+
+// Aplica el nivel de volumen (0..5) al driver de audio y recuerda el ultimo
+// nivel audible para poder reactivar el sonido desde el panel web.
+void applyVolume(uint8_t level) {
+    if (level >= VOL_STEPS) level = VOL_100;
+    sysVolume = level;
+    if (level > VOL_MUTE) lastAudibleVolume = level;
+    sound.setVolume(level);
+}
+
+void setVolumeLevel(uint8_t level) {
+    applyVolume(level);
+}
+
+// Paso de volumen desde AJUSTES DE SISTEMA: A sube, B baja hasta MUTE.
+// La pantalla no cambia: solo se mueve el nivel y suena la confirmacion ya
+// con el volumen nuevo (a 0 no suena nada).
+void stepVolume(int8_t direction) {
+    int16_t next = (int16_t)sysVolume + direction;
+    if (next < VOL_MUTE) next = VOL_MUTE;
+    if (next >= VOL_STEPS) next = VOL_100;
+    applyVolume((uint8_t)next);
+    saveSystemSettings();
+    if (sysVolume == VOL_MUTE) {
+        sound.noTone();
+    } else {
+        sound.tone(1200, 25);
+    }
+}
+
 void loadSystemSettings() {
+    uint8_t volumeVersion = 2;
     Preferences prefs;
     if (prefs.begin("sys_cfg", true)) {
         sysBrightness = prefs.getUChar("brightness", 80);
-        sysVolume = prefs.getUChar("volume", VOL_ON);
+        sysVolume = prefs.getUChar("volume", VOL_60);
+        volumeVersion = prefs.getUChar("vol_ver", 0);
         menuVisibleMask = prefs.getUInt("games_mask", 0xFFFFFFFFUL);
         // "games_cnt" = cartuchos que existian al guardar la mascara. Los
         // cartuchos anadidos despues de esa fecha entran visibles por defecto,
@@ -85,15 +126,23 @@ void loadSystemSettings() {
         }
     } else {
         sysBrightness = 80;
-        sysVolume = VOL_ON;
+        sysVolume = VOL_60;
+        volumeVersion = 2;
         menuVisibleMask = 0xFFFFFFFFUL;
     }
 
     if (sysBrightness < 10 || sysBrightness > 100) sysBrightness = 80;
-    if (sysVolume > 1) sysVolume = VOL_ON; // migra valores antiguos (2/3) a ON
+
+    // Migracion de NVS: antes "volume" era binario (0/1 del buzzer activo) y,
+    // mas atras, 2/3 sin significado para el PWM. Sin marca de version (vol_ver
+    // < 2) cualquier valor audible pasa a 60 %.
+    if (volumeVersion < 2) {
+        sysVolume = (sysVolume == VOL_MUTE) ? VOL_MUTE : VOL_60;
+    }
+    if (sysVolume >= VOL_STEPS) sysVolume = VOL_60;
 
     applyBrightness(sysBrightness);
-    sound.setVolume(sysVolume);
+    applyVolume(sysVolume);
 }
 
 void saveSystemSettings() {
@@ -101,18 +150,19 @@ void saveSystemSettings() {
     if (prefs.begin("sys_cfg", false)) {
         prefs.putUChar("brightness", sysBrightness);
         prefs.putUChar("volume", sysVolume);
+        prefs.putUChar("vol_ver", 2); // 2 = escala de 6 pasos (0..5)
         prefs.putUInt("games_mask", menuVisibleMask);
         prefs.putUChar("games_cnt", menuGameCount());
         prefs.end();
     }
 }
 
-// Con buzzer activo el volumen es binario: encendido o silencio.
+// Compatibilidad con el panel web (/api/settings "sound": 0/1): reactiva el
+// ultimo nivel audible o silencia sin perderlo.
 void setSoundEnabled(bool on) {
-    sysVolume = on ? VOL_ON : VOL_MUTE;
-    sound.setVolume(sysVolume);
+    applyVolume(on ? lastAudibleVolume : VOL_MUTE);
     if (on) {
-        sound.tone(1200, 40); // confirmación audible solo al reactivar
+        sound.tone(1200, 40); // confirmacion audible solo al reactivar
     }
 }
 
@@ -923,11 +973,11 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 }
 
 void setup() {
-    // Buzzer ACTIVO en GPIO 1 (se excita con nivel DC alto). Debe fijarse antes del pitido de encendido.
+    // Altavoz magnetico en GPIO 1: PWM LEDC real (nota por frecuencia, volumen
+    // por duty). Debe fijarse antes del pitido de encendido.
     ArduboyTones::setSpeakerPin(ARDUBOY_PIN_BUZZER);
-    ArduboyTones::setActiveBuzzer(true);
     ArduboyTones::enableAudio(true);
-    sound.setVolume(VOL_ON);
+    applyVolume(VOL_60);
     sound.noTone();
 
     // 1. Inicialización y aislamiento de todos los pines de control (Cruceta 5 vías + Botones A/B + BOOT)
@@ -1222,7 +1272,7 @@ void drawSettingsScreen() {
     // Footer
     arduboy.drawFastHLine(0, 56, 128, WHITE);
     arduboy.setCursor(4, 57);
-    arduboy.print("B:-/OFF  A:+/ON  <:SALIR");
+    arduboy.print("B:-  A:+  <:SALIR");
 }
 
 // Pantalla del AP de configuracion (Ajustes -> CONFIG WEB).
@@ -2007,7 +2057,7 @@ void loop() {
                         sound.tone(600, 15);
                     }
                 } else if (settingsCursor == 1) {
-                    setSoundEnabled(false);
+                    stepVolume(-1); // baja 20 % por pulsacion hasta MUTE, sin salir
                 } else if (settingsCursor == 2 || settingsCursor == 3) {
                     sound.tone(900, 20);
                 }
@@ -2023,7 +2073,7 @@ void loop() {
                         sound.tone(700, 15);
                     }
                 } else if (settingsCursor == 1) {
-                    setSoundEnabled(true);
+                    stepVolume(+1); // sube hasta 100 % (duty 45 %)
                 } else if (settingsCursor == 2) {
                     sound.tone(900, 20);
                 } else if (settingsCursor == 3) {

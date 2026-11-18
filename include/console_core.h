@@ -25,6 +25,8 @@ extern uint8_t sysVolume;
 extern uint8_t sysBrightness;
 
 void applyBrightness(uint8_t percent);
+// Nivel de volumen 0..5 (MUTE, 20 %, 40 %, 60 %, 80 %, 100 %).
+void setVolumeLevel(uint8_t level);
 void setSoundEnabled(bool on);
 void loadSystemSettings();
 void saveSystemSettings();

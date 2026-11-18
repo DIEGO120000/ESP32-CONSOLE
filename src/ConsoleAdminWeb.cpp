@@ -80,6 +80,12 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
   input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--cyan); border: 2px solid #0b0f19; box-shadow: 0 0 10px rgba(0,240,255,.6); cursor: pointer; }
   input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--cyan); border: 2px solid #0b0f19; cursor: pointer; }
   .val { font-size: 12px; color: var(--cyan); min-width: 42px; text-align: right; }
+  select.combo {
+    font-family: inherit; font-size: 12px; letter-spacing: .5px; color: var(--cyan);
+    background: #1b2136; border: 1px solid var(--line); border-radius: 9px;
+    padding: 8px 10px; outline: none; cursor: pointer;
+  }
+  select.combo:focus { border-color: var(--cyan); }
   .switch { position: relative; width: 52px; height: 28px; flex: 0 0 auto; }
   .switch input { opacity: 0; width: 0; height: 0; }
   .switch span { position: absolute; inset: 0; background: #222941; border: 1px solid var(--line); border-radius: 20px; transition: .2s; cursor: pointer; }
@@ -155,8 +161,15 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         <span class="val" id="brightVal">80%</span>
       </div>
       <div class="control">
-        <label>Sonido<span class="hint">Buzzer GPIO 1</span></label>
-        <div class="switch"><input id="sound" type="checkbox" checked><span></span></div>
+        <label>Volumen<span class="hint">PWM GPIO 1 · MUTE a 100 % (duty 5-45 %)</span></label>
+        <select id="vol" class="combo">
+          <option value="0">MUTE</option>
+          <option value="1">20 %</option>
+          <option value="2">40 %</option>
+          <option value="3">60 %</option>
+          <option value="4">80 %</option>
+          <option value="5">100 %</option>
+        </select>
       </div>
       <div class="control">
         <label>Reiniciar consola<span class="hint">Corta la partida en curso</span></label>
@@ -232,7 +245,8 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     if (s.settings) {
       $("bright").value = s.settings.brightness;
       $("brightVal").textContent = s.settings.brightness + "%";
-      $("sound").checked = !!s.settings.sound;
+      var vol = (s.settings.volume !== undefined) ? s.settings.volume : (s.settings.sound ? 3 : 0);
+      $("vol").value = String(vol);
     }
     if (s.uptime_ms) {
       var sec = Math.floor(s.uptime_ms / 1000);
@@ -313,7 +327,7 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           brightness: parseInt($("bright").value, 10),
-          sound: $("sound").checked ? 1 : 0
+          volume: parseInt($("vol").value, 10)
         })
       }).catch(function () { setConn(false, "SIN CONEXION"); });
     }, 180);
@@ -323,7 +337,7 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     $("brightVal").textContent = this.value + "%";
     pushSettings();
   });
-  $("sound").addEventListener("change", pushSettings);
+  $("vol").addEventListener("change", pushSettings);
 
   $("reboot").addEventListener("click", function () {
     if (!confirm("Reiniciar la consola ahora?")) return;
@@ -599,6 +613,8 @@ void ConsoleAdminWeb::handleStatus() {
     json += sysBrightness;
     json += F(",\"sound\":");
     json += (sysVolume > 0) ? 1 : 0;
+    json += F(",\"volume\":");
+    json += sysVolume;
     json += F("},\"uptime_ms\":");
     json += millis();
     json += F(",\"build\":\"");
@@ -619,6 +635,8 @@ void ConsoleAdminWeb::handleSettingsGet() {
     json += sysBrightness;
     json += F(",\"sound\":");
     json += (sysVolume > 0) ? 1 : 0;
+    json += F(",\"volume\":");
+    json += sysVolume;
     json += '}';
     sendJson(200, json);
 }
@@ -626,13 +644,16 @@ void ConsoleAdminWeb::handleSettingsGet() {
 void ConsoleAdminWeb::handleSettingsPost() {
     int brightness = -1;
     int sound = -1;
+    int volume = -1;
     if (_server->hasArg("brightness")) brightness = _server->arg("brightness").toInt();
     if (_server->hasArg("sound")) sound = _server->arg("sound").toInt();
+    if (_server->hasArg("volume")) volume = _server->arg("volume").toInt();
 
     const String body = _server->arg("plain");
     if (body.length()) {
         brightness = jsonInt(body, "\"brightness\"", brightness);
         sound = jsonBool(body, "\"sound\"", sound);
+        volume = jsonInt(body, "\"volume\"", volume);
     }
 
     if (brightness >= 0) {
@@ -640,10 +661,14 @@ void ConsoleAdminWeb::handleSettingsPost() {
         if (brightness > 100) brightness = 100;
         applyBrightness((uint8_t)brightness);
     }
-    if (sound >= 0) {
+    if (volume >= 0) {
+        // Escala de 6 pasos: MUTE, 20 %, 40 %, 60 %, 80 %, 100 %.
+        if (volume > 5) volume = 5;
+        setVolumeLevel((uint8_t)volume);
+    } else if (sound >= 0) {
         setSoundEnabled(sound != 0);
     }
-    if (brightness >= 0 || sound >= 0) {
+    if (brightness >= 0 || sound >= 0 || volume >= 0) {
         saveSystemSettings();
     }
 
@@ -651,6 +676,8 @@ void ConsoleAdminWeb::handleSettingsPost() {
     json += sysBrightness;
     json += F(",\"sound\":");
     json += (sysVolume > 0) ? 1 : 0;
+    json += F(",\"volume\":");
+    json += sysVolume;
     json += '}';
     sendJson(200, json);
 }
