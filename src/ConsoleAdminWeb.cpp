@@ -161,14 +161,15 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
         <span class="val" id="brightVal">80%</span>
       </div>
       <div class="control">
-        <label>Volumen<span class="hint">PWM GPIO 1 · MUTE a 100 % (duty 5-45 %)</span></label>
+        <label>Volumen<span class="hint">PWM GPIO 1 · 12 bits, curva logaritmica (duty 0.85-42 %)</span></label>
         <select id="vol" class="combo">
           <option value="0">MUTE</option>
-          <option value="1">20 %</option>
-          <option value="2">40 %</option>
-          <option value="3">60 %</option>
-          <option value="4">80 %</option>
-          <option value="5">100 %</option>
+          <option value="1">5 %</option>
+          <option value="2">10 %</option>
+          <option value="3">20 %</option>
+          <option value="4">40 %</option>
+          <option value="5">70 %</option>
+          <option value="6">100 %</option>
         </select>
       </div>
       <div class="control">
@@ -245,7 +246,7 @@ static const char ADMIN_HTML[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     if (s.settings) {
       $("bright").value = s.settings.brightness;
       $("brightVal").textContent = s.settings.brightness + "%";
-      var vol = (s.settings.volume !== undefined) ? s.settings.volume : (s.settings.sound ? 3 : 0);
+      var vol = (s.settings.volume !== undefined) ? s.settings.volume : (s.settings.sound ? 5 : 0);
       $("vol").value = String(vol);
     }
     if (s.uptime_ms) {
@@ -662,8 +663,8 @@ void ConsoleAdminWeb::handleSettingsPost() {
         applyBrightness((uint8_t)brightness);
     }
     if (volume >= 0) {
-        // Escala de 6 pasos: MUTE, 20 %, 40 %, 60 %, 80 %, 100 %.
-        if (volume > 5) volume = 5;
+        // Escala logaritmica de 7 pasos: MUTE, 5, 10, 20, 40, 70 y 100 %.
+        if (volume > ArduboyTones::kVolumeSteps) volume = ArduboyTones::kVolumeSteps;
         setVolumeLevel((uint8_t)volume);
     } else if (sound >= 0) {
         setSoundEnabled(sound != 0);

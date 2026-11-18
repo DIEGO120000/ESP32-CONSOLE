@@ -40,21 +40,27 @@
 #include "ConsoleAdminWeb.h"
 
 // Altavoz magnetico 8 ohm via NPN 2N2222 en GPIO 1: la nota sale del PWM
-// (frecuencia) y el volumen del ciclo de trabajo (5 %..45 %).
-// Escala de pasos: MUTE, 20 %, 40 %, 60 %, 80 %, 100 %.
+// (frecuencia) y el volumen del ciclo de trabajo. LEDC a 12 bits con curva
+// logaritmica: los pasos bajos (0.85 % y 2.2 % de duty) son de verdad suaves.
+// Escala de pasos: MUTE, 5 %, 10 %, 20 %, 40 %, 70 %, 100 % (duty 42 %).
 enum VolumeLevel : uint8_t {
     VOL_MUTE = 0,
+    VOL_5,
+    VOL_10,
     VOL_20,
     VOL_40,
-    VOL_60,
-    VOL_80,
+    VOL_70,
     VOL_100,
     VOL_STEPS
 };
 
-uint8_t sysVolume = VOL_60;
-uint8_t lastAudibleVolume = VOL_60; // se restaura al reactivar desde el panel web
-const char* const volumeLabels[VOL_STEPS] = {"MUTE", "20%", "40%", "60%", "80%", "100%"};
+uint8_t sysVolume = VOL_70;
+uint8_t lastAudibleVolume = VOL_70; // se restaura al reactivar desde el panel web
+const char* const volumeLabels[VOL_STEPS] = {"MUTE", "5%", "10%", "20%", "40%", "70%", "100%"};
+
+// Porcentajes de la escala anterior (6 pasos) para migrar la NVS sin que un
+// nivel guardado cambie de significado al pasar a la escala logaritmica.
+const uint8_t legacyVolumePercent[6] = {0, 20, 40, 60, 80, 100};
 
 Arduboy2 arduboy;
 ArduboyTones sound(arduboy.audio.enabled);
@@ -79,7 +85,7 @@ void applyBrightness(uint8_t percent) {
 
 void saveSystemSettings();
 
-// Aplica el nivel de volumen (0..5) al driver de audio y recuerda el ultimo
+// Aplica el nivel de volumen (0..6) al driver de audio y recuerda el ultimo
 // nivel audible para poder reactivar el sonido desde el panel web.
 void applyVolume(uint8_t level) {
     if (level >= VOL_STEPS) level = VOL_100;
@@ -109,11 +115,11 @@ void stepVolume(int8_t direction) {
 }
 
 void loadSystemSettings() {
-    uint8_t volumeVersion = 2;
+    uint8_t volumeVersion = 3;
     Preferences prefs;
     if (prefs.begin("sys_cfg", true)) {
         sysBrightness = prefs.getUChar("brightness", 80);
-        sysVolume = prefs.getUChar("volume", VOL_60);
+        sysVolume = prefs.getUChar("volume", VOL_70);
         volumeVersion = prefs.getUChar("vol_ver", 0);
         menuVisibleMask = prefs.getUInt("games_mask", 0xFFFFFFFFUL);
         // "games_cnt" = cartuchos que existian al guardar la mascara. Los
@@ -126,20 +132,29 @@ void loadSystemSettings() {
         }
     } else {
         sysBrightness = 80;
-        sysVolume = VOL_60;
-        volumeVersion = 2;
+        sysVolume = VOL_70;
+        volumeVersion = 3;
         menuVisibleMask = 0xFFFFFFFFUL;
     }
 
     if (sysBrightness < 10 || sysBrightness > 100) sysBrightness = 80;
 
-    // Migracion de NVS: antes "volume" era binario (0/1 del buzzer activo) y,
-    // mas atras, 2/3 sin significado para el PWM. Sin marca de version (vol_ver
-    // < 2) cualquier valor audible pasa a 60 %.
-    if (volumeVersion < 2) {
-        sysVolume = (sysVolume == VOL_MUTE) ? VOL_MUTE : VOL_60;
+    // Migracion de NVS (vol_ver):
+    //   < 2  "volume" era binario (0/1 del buzzer activo).
+    //   == 2 escala lineal de 6 pasos (0..5) que ya no existe.
+    //   == 3 escala logaritmica de 7 pasos (0..6).
+    // El indice antiguo se convierte por porcentaje, no por posicion, para que
+    // un 60 % guardado no se convierta en 10 %.
+    if (volumeVersion < 3) {
+        uint8_t pct;
+        if (volumeVersion < 2) {
+            pct = (sysVolume == 0) ? 0 : 60;
+        } else {
+            pct = legacyVolumePercent[sysVolume < 6 ? sysVolume : 5];
+        }
+        sysVolume = ArduboyTones::indexForPercent(pct);
     }
-    if (sysVolume >= VOL_STEPS) sysVolume = VOL_60;
+    if (sysVolume >= VOL_STEPS) sysVolume = VOL_70;
 
     applyBrightness(sysBrightness);
     applyVolume(sysVolume);
@@ -150,7 +165,7 @@ void saveSystemSettings() {
     if (prefs.begin("sys_cfg", false)) {
         prefs.putUChar("brightness", sysBrightness);
         prefs.putUChar("volume", sysVolume);
-        prefs.putUChar("vol_ver", 2); // 2 = escala de 6 pasos (0..5)
+        prefs.putUChar("vol_ver", 3); // 3 = escala logaritmica de 7 pasos (0..6)
         prefs.putUInt("games_mask", menuVisibleMask);
         prefs.putUChar("games_cnt", menuGameCount());
         prefs.end();
@@ -907,6 +922,9 @@ void exitCurrentGameToMainMenu() {
         catacombs3D.init();
 #endif
     }
+    // Un cartucho pudo silenciarse a si mismo con arduboy.audio.off(): el
+    // nucleo y sus menus siempre vuelven al menu con audio habilitado.
+    ArduboyTones::enableAudio(true);
     melodyPlayer.stop();
     sound.noTone();
     sound.tone(600, 30);
@@ -977,7 +995,7 @@ void setup() {
     // por duty). Debe fijarse antes del pitido de encendido.
     ArduboyTones::setSpeakerPin(ARDUBOY_PIN_BUZZER);
     ArduboyTones::enableAudio(true);
-    applyVolume(VOL_60);
+    applyVolume(VOL_70);
     sound.noTone();
 
     // 1. Inicialización y aislamiento de todos los pines de control (Cruceta 5 vías + Botones A/B + BOOT)
