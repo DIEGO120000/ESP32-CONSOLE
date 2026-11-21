@@ -1,92 +1,80 @@
 #include "hopper_game.h"
-
-#include "hopper.h"
-#include "frog.h"
-#include "obstacle.h"
-#include "lane.h"
-#include "console_core.h"
+#include "common.h"
 
 // =============================================================================
-// Adaptador del cartucho Hopper. Los objetos del mundo se crean y destruyen en
-// setup(), con los mismos parametros de los globales del Hopper.ino original:
-//
-//   Frog frog(&arduboy, &sound, 32, 58);
-//   Lane lane1(&arduboy, 47, 3, 20,  1, 60, CAR);
-//   Lane lane2(&arduboy, 39, 4, 15, -2, 40, CAR);
-//   Lane lane3(&arduboy, 31, 3, 30,  1, 40, CAR);
-//   Lane lane4(&arduboy, 15, 3, 20,  1, 70, LOG);
-//   Lane lane5(&arduboy,  7, 3, 30, -1, 50, LOG);
-//
-// La consola (main.cpp) ya inicializa la HAL y dibuja el framebuffer, por lo
-// que setup() no llama a arduboy.begin() ni loop() a arduboy.display().
+// Despachador equivalente al loop() de hopper.ino. La consola ya marca el
+// ritmo de 60 FPS (el original fijaba 60) y dibuja el framebuffer, por lo que
+// aqui solo se separa la actualizacion del dibujado.
 // =============================================================================
 namespace HopperGame {
 
-static Frog *frog = nullptr;
-static Lane *lanes[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+enum MODE {
+    LOGO_MODE = 0,
+    TITLE_MODE,
+    GAME_MODE
+};
+
+typedef struct {
+    void (*initFunc)(void);
+    bool (*updateFunc)(void);
+    void (*drawFunc)(void);
+} MODULE_FUNCS;
+
+MyArduboy arduboy;
+
+static const MODULE_FUNCS moduleTable[] = {
+    { initLogo,  updateLogo,  drawLogo },
+    { initTitle, updateTitle, drawTitle },
+    { initGame,  updateGame,  drawGame },
+};
+
+static uint8_t mode = LOGO_MODE;
+static bool pendingDone = false;
 
 void setup() {
-  delete frog;
-  frog = nullptr;
-  for (uint8_t i = 0; i < 5; i++) {
-    delete lanes[i];
-    lanes[i] = nullptr;
-  }
-
-  frog = new Frog(&arduboy, &sound, 32, 58);
-  lanes[0] = new Lane(&arduboy, 47, 3, 20,  1, 60, CAR);
-  lanes[1] = new Lane(&arduboy, 39, 4, 15, -2, 40, CAR);
-  lanes[2] = new Lane(&arduboy, 31, 3, 30,  1, 40, CAR);
-  lanes[3] = new Lane(&arduboy, 15, 3, 20,  1, 70, LOG);
-  lanes[4] = new Lane(&arduboy,  7, 3, 30, -1, 50, LOG);
+    mode = LOGO_MODE;
+    pendingDone = false;
+    moduleTable[mode].initFunc();
 }
 
 void update() {
-  frog->update();
-  for (uint8_t i = 0; i < 5; i++) lanes[i]->update();
-}
+    // Latch propio de botones y avance de la melodia en curso.
+    arduboy.latchButtons();
+    arduboy.tunes.update();
+    hopperEeprom.poll();
 
-static void drawSafetyZones() {
-  // Zones start at y = 24 and y = 56
-  arduboy.drawFastHLine(0, 23, 128, WHITE);
-  arduboy.drawFastHLine(0, 29, 128, WHITE);
-  arduboy.drawFastHLine(0, 55, 128, WHITE);
+    // El cambio de modo ocurre despues de mostrar el ultimo frame del modo
+    // anterior, igual que en el loop() original.
+    if (pendingDone) {
+        pendingDone = false;
+        mode = (mode == TITLE_MODE) ? GAME_MODE : TITLE_MODE;
+        moduleTable[mode].initFunc();
+    }
+
+    if (moduleTable[mode].updateFunc()) {
+        pendingDone = true;
+    }
 }
 
 void draw() {
-  arduboy.clear();
-
-  drawSafetyZones();
-  frog->draw();
-
-  for (uint8_t i = 0; i < 5; i++) lanes[i]->draw();
+    moduleTable[mode].drawFunc();
 }
 
-// Equivalente exacto al cuerpo del loop() original (sin nextFrame/display,
-// que pertenecen al bucle de la consola).
 void loop() {
-  update();
-  draw();
+    update();
+    draw();
 }
 
 } // namespace HopperGame
 
-// -----------------------------------------------------------------------------
-// Interfaz del cartucho
-// -----------------------------------------------------------------------------
 void HopperPort::init() {
-  HopperGame::setup();
-  frameDivider = 0;
+    HopperGame::setup();
 }
 
 void HopperPort::update() {
-  // El original trabaja a 30 FPS (arduboy.setFrameRate(30)); el bucle de la
-  // consola corre a 60 FPS. Actualizar un frame de cada dos conserva exactamente
-  // la velocidad de los coches, troncos y saltos de la rana.
-  if ((frameDivider++ & 0x01) != 0) return;
-  HopperGame::update();
+    HopperGame::update();
 }
 
 void HopperPort::draw() {
-  HopperGame::draw();
+    HopperGame::draw();
 }

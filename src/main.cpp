@@ -618,6 +618,10 @@ unsigned long bootRawLowStart = 0;
 bool bootDebouncedDown = false;
 unsigned long bootDebouncedPressStart = 0;
 unsigned long exitComboStart = 0;
+#ifdef ENABLE_GAME_HOPPER
+unsigned long hopperExitStart = 0;
+bool hopperExitArmed = false;
+#endif
 const unsigned long INACTIVITY_TIMEOUT_MS = 90000UL; // 90s timeout de inactividad
 unsigned long lastActivityTime = 0;
 
@@ -743,7 +747,10 @@ bool isCurrentGameActive() {
 
 #ifdef ENABLE_GAME_HOPPER
         case STATE_HOPPER:
-            return hopperPort.isPlaying();
+            // Hopper usa A/B para confirmar y pausar dentro del juego: la
+            // pausa universal no debe robarle esos botones. La salida al menu
+            // es B mantenido (ver bloque de salida de Hopper en loop()).
+            return false;
 #endif
 
         default:
@@ -1093,6 +1100,34 @@ void setup() {
 
     // Cargar y aplicar brillo de pantalla y volumen desde NVS ("sys_cfg")
     loadSystemSettings();
+
+#ifdef ENABLE_GAME_HOPPER
+    // Activacion puntual de Hopper. Al insertarse antes de "Test Pines
+    // Cruceta", la mascara guardada por un firmware anterior podia dejar su
+    // bit apagado y el cartucho no salia en el carrusel. Se enciende una sola
+    // vez y se recuerda; si luego se oculta desde /config, no reaparece.
+    {
+        bool alreadyMigrated = false;
+        Preferences prefs;
+        if (prefs.begin("sys_cfg", true)) {
+            alreadyMigrated = prefs.getBool("hopper_on", false);
+            prefs.end();
+        }
+        if (!alreadyMigrated) {
+            for (uint8_t i = 0; i < MENU_COUNT; i++) {
+                if (menuEntries[i].state == STATE_HOPPER) {
+                    menuGameSetEnabled(i, true);
+                    break;
+                }
+            }
+            Preferences out;
+            if (out.begin("sys_cfg", false)) {
+                out.putBool("hopper_on", true);
+                out.end();
+            }
+        }
+    }
+#endif
 
     // Panel web de administracion + OTA: registra sus rutas en el WebServer del
     // AP de mandos. El AP arranca solo en el modo 2P Wi-Fi de Ping Pong.
@@ -1691,8 +1726,9 @@ void loop() {
         && currentState != STATE_SEA_BATTLE
 #endif
 #ifdef ENABLE_GAME_HOPPER
-        // En Hopper LEFT y B son controles validos (mover y pausar): el combo
-        // universal no debe sacar al menu por accidente.
+        // En Hopper A, B y la cruceta son controles de juego: el combo
+        // universal no debe sacar al menu por accidente. La salida propia es
+        // B mantenido.
         && currentState != STATE_HOPPER
 #endif
 #ifdef ENABLE_EIGHTEEN_HOLES
@@ -1727,6 +1763,26 @@ void loop() {
             exitComboStart = 0;
         }
     }
+
+#ifdef ENABLE_GAME_HOPPER
+    // Salida de Hopper: B mantenido ~0,7 s. Un toque sigue siendo control del
+    // juego (confirmar / pausar), sin interferir con la cruceta.
+    if (currentState == STATE_HOPPER) {
+        if (arduboy.pressed(B_BUTTON)) {
+            if (!hopperExitArmed) {
+                hopperExitArmed = true;
+                hopperExitStart = millis();
+            } else if (millis() - hopperExitStart >= 700) {
+                hopperExitArmed = false;
+                exitCurrentGameToMainMenu();
+            }
+        } else {
+            hopperExitArmed = false;
+        }
+    } else {
+        hopperExitArmed = false;
+    }
+#endif
 
     switch (currentState) {
         case STATE_MENU: {

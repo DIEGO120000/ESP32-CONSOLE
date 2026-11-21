@@ -1,54 +1,53 @@
-# Hopper
+# Hopper (OBN-Y02)
 
-Port fiel del juego original de **Kevin McDermott** (bigkevmcd/arduboy-hopper,
-rama `master`, licencia MIT): una rana que cruza carreteras y ríos esquivando
-coches y saltando entre troncos.
+Port del juego original **Hopper** de OBONO, del repositorio oficial
+[obono/ArduboyWorks](https://github.com/obono/ArduboyWorks) (carpeta `hopper/`),
+licencia MIT.
+
+Juego isometrico: salta sobre los paneles y sube; si caes hacia abajo, la
+partida termina. Incluye logo, titulo animado, tabla de records, niveles y
+sonido originales.
 
 ## Origen
 
 | Archivo | Procedencia |
 |---|---|
-| `Hopper.ino` | Original íntegro, conservado como referencia (no entra en el build) |
-| `hopper.h` | Original íntegro (`LANESIZE`, `CAR`, `LOG`) |
-| `frog.h` / `frog.cpp` | Original; solo se envolvió en `namespace HopperGame` |
-| `lane.h` / `lane.cpp` | Original; idem + destructor para reiniciar sin fugas |
-| `obstacle.h` / `obstacle.cpp` | Original; idem |
-| `hopper_game.h` / `hopper_game.cpp` | Adaptador al HAL y a la interfaz de cartuchos |
-| `LICENSE` | Licencia MIT original |
+| `hopper.ino` | Original integro (referencia; PlatformIO no compila `.ino` de subcarpetas) |
+| `common.h` | Original, encapsulado en `namespace HopperGame` |
+| `game.cpp` | Original: fisicas, paneles, chips, niveles y puntuacion |
+| `title.cpp` | Original: menu, records y creditos (solo se ajusto la lectura del puntero a 32 bits) |
+| `logo.cpp` | Original |
+| `MyArduboy.h/.cpp` | Capa HAL adaptada a `Arduboy2`/`ArduboyTones` |
+| `hopper_eeprom.h/.cpp` | EEPROM aislada en NVS (`hopper_rec`) |
+| `hopper_game.h/.cpp` | Despachador logo/titulo/juego para la consola |
+| `LICENSE` | MIT del repositorio upstream |
 
-La física, los carriles, las velocidades, el área de colisión y el sprite de la
-rana son los del repositorio original. `HopperGame::setup()` replica la creación
-de `frog`, `lane1`…`lane5` con los mismos parámetros del `.ino`.
+## Adaptaciones de plataforma
 
-## Controles
+- **Arduboy 1.1.1 -> HAL actual.** `MyArduboy` mantiene la API que usa el juego
+  (`buttonDown/Pressed/Up`, `printEx`, fuente 6x6, `drawRect2`, `fillRect2`,
+  `drawFastHLine2/VLine2`, `playScore2`). `beginNoLogo()` es no-op porque la
+  consola ya inicializo pantalla y audio.
+- **Sprites.** `drawBitmap` se reimplementa con el formato Arduboy por
+  columnas/paginas; el HAL base usa formato horizontal y los graficos se veian
+  transpuestos. Los arrays `PROGMEM` no se modifican.
+- **Audio.** `playScore2` reproduce el formato de ArduboyPlaytune (0x90 nota,
+  0x80 stop, esperas de 15 bits, mark/repeat/stop) sobre el buzzer PWM. Es
+  monofonico, como el hardware de la consola.
+- **Record.** Las funciones `eeprom_*` se emulan sobre un blob de 1 KB en la NVS
+  `hopper_rec`; no comparten la EEPROM de otros cartuchos. Las escrituras se
+  agrupan 250 ms para no castigar la flash.
+- **Timing.** El original fija 60 FPS; la consola ya corre a 60, sin divisores.
+- **Salida.** B mantenido ~0,7 s vuelve al menu de la consola. Un toque de B
+  sigue siendo el control original (confirmar/pausar). La pausa universal no
+  intercepta A/B en este cartucho.
 
-| Entrada | Acción |
-|---|---|
-| Cruceta arriba/abajo/izquierda/derecha | Saltar un carril (8 px) |
-| B | Pausa universal de la consola (Continuar / Menú Consola) |
-
-Hopper no usa A ni B en su lógica original, por lo que B queda libre para la
-pausa y la salida al menú sin interferir con el juego.
-
-## Integración
+## Integracion
 
 ```cpp
 #define ENABLE_GAME_HOPPER 1   // include/games_config.h
 ```
 
-`src/main.cpp` registra el cartucho como `STATE_HOPPER` en el carrusel, la pausa
-y el bucle de dibujado. El panel web (`/config`) lo lista automáticamente a
-partir de `menuGameEntries[]` y permite ocultarlo en caliente (NVS
-`sys_cfg`/`games_mask`).
-
-## Notas de fidelidad
-
-- El original fijaba `arduboy.setFrameRate(30)`. El bucle de la consola corre a
-  60 FPS, así que `HopperPort::update()` ejecuta la lógica un frame de cada dos
-  para conservar la velocidad exacta de coches y troncos.
-- El README upstream indica que el juego está incompleto y **no define game
-  over**; el port conserva ese comportamiento y no inventa colisiones ni estados
-  finales. `Obstacle::intersects()` se mantiene tal cual, disponible para la
-  versión original.
-- `Hopper.ino` se conserva sin modificar como referencia histórica; PlatformIO
-  solo compila los `.cpp` del cartucho.
+`src/main.cpp` registra `STATE_HOPPER` en el carrusel, el panel `/config`, la
+pausa y el despachador de update/draw. El cartucho vive en `ports/hopper/` y no
+modifica ningun otro port ni `sim/`.
