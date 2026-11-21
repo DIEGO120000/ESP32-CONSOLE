@@ -36,6 +36,9 @@
 #ifdef ENABLE_SEA_BATTLE
   #include "../ports/sea_battle/sea_battle.h"
 #endif
+#ifdef ENABLE_GAME_HOPPER
+  #include "../ports/hopper/hopper_game.h"
+#endif
 #include "WiFiGamepadServer.h"
 #include "ConsoleAdminWeb.h"
 
@@ -386,6 +389,10 @@ CyberEscapeGame cyberEscape;
 SeaBattleGame seaBattle;
 #endif
 
+#ifdef ENABLE_GAME_HOPPER
+HopperPort hopperPort;
+#endif
+
 
 
 // =============================================================================
@@ -433,6 +440,9 @@ enum SystemState {
 #endif
 #ifdef ENABLE_SEA_BATTLE
     STATE_SEA_BATTLE,
+#endif
+#ifdef ENABLE_GAME_HOPPER
+    STATE_HOPPER,
 #endif
     STATE_PIN_DIAGNOSTIC,
     STATE_SETTINGS,
@@ -526,6 +536,9 @@ const MenuEntry menuEntries[] = {
 #endif
 #ifdef ENABLE_CATACOMBS_3D
     { "Catacombs 3D",       STATE_CATACOMBS },
+#endif
+#ifdef ENABLE_GAME_HOPPER
+    { "Hopper",             STATE_HOPPER },
 #endif
     { "Test Pines Cruceta", STATE_PIN_DIAGNOSTIC }
 };
@@ -728,6 +741,11 @@ bool isCurrentGameActive() {
             return seaBattle.isCombat();
 #endif
 
+#ifdef ENABLE_GAME_HOPPER
+        case STATE_HOPPER:
+            return hopperPort.isPlaying();
+#endif
+
         default:
             return false;
     }
@@ -928,6 +946,10 @@ void exitCurrentGameToMainMenu() {
 #ifdef ENABLE_CATACOMBS_3D
     } else if (currentState == STATE_CATACOMBS) {
         catacombs3D.init();
+#endif
+#ifdef ENABLE_GAME_HOPPER
+    } else if (currentState == STATE_HOPPER) {
+        hopperPort.init();
 #endif
     }
     // Un cartucho pudo silenciarse a si mismo con arduboy.audio.off(): el
@@ -1168,6 +1190,9 @@ void launchSelectedGame() {
 #endif
 #ifdef ENABLE_SEA_BATTLE
         case STATE_SEA_BATTLE:     seaBattle.init();    break;
+#endif
+#ifdef ENABLE_GAME_HOPPER
+        case STATE_HOPPER:         hopperPort.init();   break;
 #endif
         case STATE_PIN_DIAGNOSTIC: break;   // sin init: pantalla de diagnostico
         default: break;
@@ -1665,6 +1690,11 @@ void loop() {
 #ifdef ENABLE_SEA_BATTLE
         && currentState != STATE_SEA_BATTLE
 #endif
+#ifdef ENABLE_GAME_HOPPER
+        // En Hopper LEFT y B son controles validos (mover y pausar): el combo
+        // universal no debe sacar al menu por accidente.
+        && currentState != STATE_HOPPER
+#endif
 #ifdef ENABLE_EIGHTEEN_HOLES
         // En 18 Holes A y B son controles de juego (golpear / menu interno).
         && currentState != STATE_EIGHTEEN_HOLES
@@ -1943,6 +1973,13 @@ void loop() {
                 seaBattle.exitRequested = false;
                 currentState = STATE_MENU;
             }
+            break;
+#endif
+
+#ifdef ENABLE_GAME_HOPPER
+        case STATE_HOPPER:
+            if (allowGameUpdate) hopperPort.update();
+            hopperPort.draw();
             break;
 #endif
 

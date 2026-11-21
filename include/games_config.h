@@ -45,3 +45,6 @@
 
 // Minigolf 3D de 18 hoyos (ArduGolf, MPL-2.0): port fiel con el core original.
 #define ENABLE_EIGHTEEN_HOLES
+
+// Hopper (bigkevmcd/arduboy-hopper, MIT): port fiel del codigo original.
+#define ENABLE_GAME_HOPPER 1
