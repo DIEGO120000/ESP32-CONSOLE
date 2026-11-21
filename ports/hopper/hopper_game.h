@@ -26,5 +26,6 @@ public:
     void update();
     void draw();
 
+    bool exitRequested = false;
     bool isPlaying() const { return true; }
 };

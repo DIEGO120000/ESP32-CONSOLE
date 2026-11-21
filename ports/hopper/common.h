@@ -46,6 +46,7 @@ void drawGame(void);
 /*  Global Variables  */
 
 extern MyArduboy arduboy;
+extern bool exitRequested;
 
 /*  For Debugging  */
 

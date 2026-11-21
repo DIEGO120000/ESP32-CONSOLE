@@ -2036,6 +2036,10 @@ void loop() {
         case STATE_HOPPER:
             if (allowGameUpdate) hopperPort.update();
             hopperPort.draw();
+            if (hopperPort.exitRequested) {
+                hopperPort.exitRequested = false;
+                exitCurrentGameToMainMenu();
+            }
             break;
 #endif
 

@@ -170,6 +170,10 @@ PROGMEM static const byte soundJump[] = {
     0x90, 77, 0, 15, 0x90, 89, 0, 15, 0x80, 0xF0
 };
 
+PROGMEM static const byte soundClick[] = {
+    0x90, 72, 0, 20, 0x80, 0xF0
+};
+
 PROGMEM static const byte soundClear[] = {
     0x90, 81, 0, 40, 0x80, 0, 40,
     0x90, 86, 0, 40, 0x80, 0, 40,
@@ -191,6 +195,8 @@ PROGMEM static const byte soundOver[] = {
 
 static uint8_t  state;
 static bool     toDraw;
+static uint8_t  pauseCursor = 0;
+bool            exitRequested = false;
 static uint32_t gameFrames;
 static int      counter;
 static int8_t   ignoreCnt;
@@ -230,15 +236,31 @@ bool updateGame(void)
 {
     /*  In cas of pausing  */
     if (state == STATE_PAUSE) {
-        if (arduboy.buttonDown(A_BUTTON | B_BUTTON)) {
+        // Navegacion entre RESUME y EXIT con la cruceta.
+        if (arduboy.buttonDown(UP_BUTTON) || arduboy.buttonDown(DOWN_BUTTON)) {
+            pauseCursor = (pauseCursor == 0) ? 1 : 0;
+            arduboy.playScore2(soundClick, 255);
+        }
+        // Seleccion con A o boton central (CLICK).
+        if (arduboy.buttonDown(A_BUTTON | CLICK_BUTTON)) {
+            if (pauseCursor == 0) {
+                state = STATE_GAME;
+                ignoreCnt = 30; // 1/2 sec
+                toDraw = true;
+                dprintln("Resume");
+            } else {
+                exitRequested = true;
+                dprintln("Exit");
+            }
+        }
+        // B reanuda directamente.
+        if (arduboy.buttonDown(B_BUTTON)) {
             state = STATE_GAME;
             ignoreCnt = 30; // 1/2 sec
             toDraw = true;
             dprintln("Resume");
         }
-        // Mantiene la escena congelada visible en el OLED de la consola:
-        // el bucle principal limpia el framebuffer cada frame, por lo que hay
-        // que redibujar la partida en pausa en cada frame.
+        // Mantiene la escena congelada visible en el OLED de la consola.
         toDraw = true;
         return false;
     }
@@ -276,6 +298,7 @@ bool updateGame(void)
                 dprintln(score);
             } else if (ignoreCnt == 0 && arduboy.buttonDown(A_BUTTON | B_BUTTON)) {
                 state = STATE_PAUSE;
+                pauseCursor = 0;
                 dprintln("Pause");
             }
         } else {
@@ -306,10 +329,12 @@ void drawGame(void)
         drawStrings();
         if (state == STATE_PAUSE) {
             // Recuadro negro con borde blanco, centrado, sobre la escena.
-            arduboy.fillRect(40, 24, 48, 16, BLACK);
-            arduboy.drawRect(40, 24, 48, 16, WHITE);
+            arduboy.fillRect(34, 16, 60, 36, BLACK);
+            arduboy.drawRect(34, 16, 60, 36, WHITE);
             arduboy.setTextColor(WHITE);
-            arduboy.printEx(49, 28, F("PAUSE"));
+            arduboy.printEx(49, 20, F("PAUSE"));
+            arduboy.printEx(40, 30, (pauseCursor == 0) ? F(">RESUME") : F(" RESUME"));
+            arduboy.printEx(40, 38, (pauseCursor == 1) ? F(">EXIT") : F(" EXIT"));
             arduboy.display();
         }
         isBlink = !isBlink;

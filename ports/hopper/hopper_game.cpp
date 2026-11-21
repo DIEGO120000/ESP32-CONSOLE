@@ -68,11 +68,17 @@ void loop() {
 } // namespace HopperGame
 
 void HopperPort::init() {
+    exitRequested = false;
+    HopperGame::exitRequested = false;
     HopperGame::setup();
 }
 
 void HopperPort::update() {
     HopperGame::update();
+    if (HopperGame::exitRequested) {
+        exitRequested = true;
+        HopperGame::exitRequested = false;
+    }
 }
 
 void HopperPort::draw() {
