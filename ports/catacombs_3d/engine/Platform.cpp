@@ -13,6 +13,8 @@
 
 #include "Platform.h"
 #include "Defines.h"
+#include "Sounds.h"
+#include "sfx_pcm.h"
 
 // Objetos globales de la consola (definidos en src/main.cpp o sim/main_sim.cpp).
 extern Arduboy2 arduboy;
@@ -195,6 +197,15 @@ void Platform::PlaySound(const uint16_t* audioPattern)
 {
 	if (!audioPattern || !IsAudioEnabled())
 		return;
+
+	// La bola de fuego lanzada con la mano usa una llamarada PCM real
+	// ('fishiuu') en lugar del patron de pitidos original.
+	if (audioPattern == Sounds::Attack)
+	{
+		stopPattern();
+		sound.playPcm(SFX_FIRE_FLAME, SFX_FIRE_FLAME_LEN);
+		return;
+	}
 
 	tonePattern = audioPattern;
 	tonePosition = 0;

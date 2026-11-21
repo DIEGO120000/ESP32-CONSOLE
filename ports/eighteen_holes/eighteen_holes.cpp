@@ -26,6 +26,7 @@
 #include <Preferences.h>
 
 #include "console_core.h"
+#include "sfx_pcm.h"
 #include "eighteen_holes.h"
 
 namespace eighteen_holes {
@@ -97,6 +98,43 @@ bool at_title()
     return state == st::TITLE;
 }
 
+// ---------------------------------------------------------------------------
+// Audio PCM del rodar de la bola. ball_vel esta en formato fijo 256x unidad
+// por paso de fisica; el umbral descarta el temblor residual antes de parar.
+// ---------------------------------------------------------------------------
+static uint16_t abs_vel(int16_t v)
+{
+    return (v < 0) ? (uint16_t)(-v) : (uint16_t)v;
+}
+
+static uint16_t ball_speed()
+{
+    uint16_t s = abs_vel(ball_vel.x);
+    uint16_t sy = abs_vel(ball_vel.y);
+    uint16_t sz = abs_vel(ball_vel.z);
+    if (sy > s) s = sy;
+    if (sz > s) s = sz;
+    return s;
+}
+
+static constexpr uint16_t BALL_ROLL_THRESHOLD = 384;
+
+bool ball_is_rolling()
+{
+    return state == st::ROLLING && ball_speed() > BALL_ROLL_THRESHOLD;
+}
+
+// 0..255 para modular la amplitud del bucle sin reiniciar la muestra.
+uint8_t ball_roll_gain()
+{
+    const uint16_t s = ball_speed();
+    if (s <= BALL_ROLL_THRESHOLD) return 40;
+    constexpr uint16_t kMax = 6000; // velocidad de putt fuerte
+    if (s >= kMax) return 255;
+    return (uint8_t)(40 + ((uint32_t)(s - BALL_ROLL_THRESHOLD) * 215UL) /
+                             (kMax - BALL_ROLL_THRESHOLD));
+}
+
 } // namespace eighteen_holes
 
 // -----------------------------------------------------------------------------
@@ -132,6 +170,21 @@ void EighteenHolesGame::update()
 
     eighteen_holes::game_loop();
     memcpy(eh_last_frame, eighteen_holes::buf, sizeof(eh_last_frame));
+
+    // Rodar de la bola: bucle PCM con amplitud proporcional a la velocidad.
+    // Se detiene en cuanto la fisica deja el estado ROLLING o la bola se para.
+    if (eighteen_holes::ball_is_rolling() && ArduboyTones::getVolume() > 0) {
+        if (!ArduboyTones::isPcmLooping()) {
+            if (!sound.playing()) {
+                sound.playPcm(SFX_GOLF_ROLL, SFX_GOLF_ROLL_LEN, true);
+                ArduboyTones::setPcmGain(eighteen_holes::ball_roll_gain());
+            }
+        } else {
+            ArduboyTones::setPcmGain(eighteen_holes::ball_roll_gain());
+        }
+    } else if (ArduboyTones::isPcmLooping()) {
+        ArduboyTones::stopPcm();
+    }
 }
 
 void EighteenHolesGame::draw()

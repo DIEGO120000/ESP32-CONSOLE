@@ -6,6 +6,7 @@
 #include "WolfPlatform.h"
 #include "Engine.h"
 #include "Sounds.h"
+#include "sfx_pcm.h"
 
 // Objetos globales de la consola (definidos en main.cpp).
 extern Arduboy2 arduboy;
@@ -37,10 +38,15 @@ void ArduboyPlatform::playSound(uint8_t id)
     case NAZIFIRESND:
     case SSFIRESND:
     case BOSSFIRESND:
-        sound.tone(1100, 18);
+        // Disparo del jugador: PCM real de pistola (no un pitido de tone()).
+        sound.playPcm(SFX_WOLF_SHOT, SFX_WOLF_SHOT_LEN);
         break;
 
     case HITENEMYSND:
+        // El disparo abate al enemigo: quejido grave de muerte.
+        sound.playPcm(SFX_WOLF_DEATH, SFX_WOLF_DEATH_LEN);
+        break;
+
     case HITWALLSND:
     case SHOOTDOORSND:
         sound.tone(220, 14);
@@ -59,18 +65,27 @@ void ArduboyPlatform::playSound(uint8_t id)
         sound.tone(240, 35);
         break;
 
-    case GETKEYSND:
     case GETAMMOSND:
     case GETMACHINESND:
     case GETGATLINGSND:
+        // Arma o municion: doble chasquido metalico de cerrojo.
+        sound.playPcm(SFX_WOLF_RELOAD, SFX_WOLF_RELOAD_LEN);
+        break;
+
     case HEALTH1SND:
     case HEALTH2SND:
-    case BONUS1SND:
-    case BONUS2SND:
-    case BONUS3SND:
-    case BONUS4SND:
+    case BONUS1SND: // comida (perro)
+    case BONUS3SND: // botiquin
+        // Vida o comida: trago liquido 'glup-glup'.
+        sound.playPcm(SFX_WOLF_GULP, SFX_WOLF_GULP_LEN);
+        break;
+
+    case GETKEYSND:
+    case BONUS2SND: // tesoro
+    case BONUS4SND: // vida extra
     case BONUS1UPSND:
-        sound.tone(1400, 25);
+        // Tesoro/dinero u objeto brillante: tintineo metalico.
+        sound.playPcm(SFX_WOLF_COIN, SFX_WOLF_COIN_LEN);
         break;
 
     case SELECTWPNSND:
@@ -95,11 +110,13 @@ void ArduboyPlatform::playSound(uint8_t id)
     case DEATHSCREAM8SND:
     case DEATHSCREAM9SND:
     case GAMEOVERSND:
-        sound.tone(120, 90);
+    case DIESND:
+    case AHHHGSND:
+    case DOGDEATHSND:
+        sound.playPcm(SFX_WOLF_DEATH, SFX_WOLF_DEATH_LEN);
         break;
 
     case DOGBARKSND:
-    case DOGDEATHSND:
         sound.tone(500, 30);
         break;
 

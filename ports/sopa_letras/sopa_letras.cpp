@@ -584,16 +584,21 @@ void WordSearchGame::drawBoardView() {
         }
     }
 
-    // 5. Indicador visual discreto ("INFO >") en la esquina inferior derecha
-    int16_t bx = 93;
-    int16_t by = 58;
-    bool hilite = (cursorCol == GRID_COLS - 1) && ((arduboy.frameCount % 16) < 8);
-    if (hilite) {
-        arduboy.fillRect(bx - 2, by - 1, 31, 7, WHITE);
-        drawMiniText(bx, by, "INFO >", BLACK);
-    } else {
-        arduboy.fillRect(bx - 2, by - 1, 31, 7, BLACK);
-        drawMiniText(bx, by, "INFO >", WHITE);
+    // 5. Indicador visual discreto ("INFO >") en la esquina inferior derecha.
+    // Solo en dificultad FACIL y con parpadeo lento: 3 s visible / 6 s oculto
+    // (ciclo de 9 s). En MEDIO/DIFICIL se omite por completo para no tapar
+    // nunca las letras de la ultima fila.
+    if (currentDifficulty == SOPA_DIFF_FACIL && (millis() % 9000UL) < 3000UL) {
+        int16_t bx = 93;
+        int16_t by = 58;
+        bool hilite = (cursorCol == GRID_COLS - 1) && ((arduboy.frameCount % 16) < 8);
+        if (hilite) {
+            arduboy.fillRect(bx - 2, by - 1, 31, 7, WHITE);
+            drawMiniText(bx, by, "INFO >", BLACK);
+        } else {
+            arduboy.fillRect(bx - 2, by - 1, 31, 7, BLACK);
+            drawMiniText(bx, by, "INFO >", WHITE);
+        }
     }
 }
 

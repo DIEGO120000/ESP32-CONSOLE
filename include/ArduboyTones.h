@@ -6,9 +6,13 @@
 #include "esp_timer.h"
 #endif
 #if defined(PC_EMULATOR)
-// Salida de audio del emulador (onda cuadrada en sim/main_sim.cpp).
+// Salida de audio del emulador (onda cuadrada / PCM en sim/main_sim.cpp).
 void simAudioTone(uint16_t freq);
 void simAudioOff();
+void simAudioPcm(const uint8_t* data, uint32_t len, bool loop);
+void simAudioPcmStop();
+void simAudioPcmGain(uint8_t gain);
+bool simAudioPcmPlaying();
 #endif
 
 // =============================================================================
@@ -64,6 +68,27 @@ public:
 
     static constexpr uint8_t kMultiBufWords = 16;
 
+    // --- Motor PCM (muestras unsigned 8-bit @ 8000 Hz) ---------------------
+    // La portadora LEDC sube a 31.25 kHz con 8 bits de resolucion: muy por
+    // encima del audio audible, de modo que el duty cycle reproduce la muestra
+    // y el altavoz solo deja pasar la envolvente acustica. Un timer de
+    // hardware periodico de 125 us (8 kHz) entrega el byte siguiente desde la
+    // ISR sin bloquear el juego. Al agotar la muestra el duty queda en 0: el
+    // 2N2222 corta.
+    //
+    // Nota: el core Arduino-ESP32 de este proyecto compila esp_timer sin
+    // CONFIG_ESP_TIMER_SUPPORTS_ISR_DISPATCH_METHOD, y el despacho por tarea
+    // agrupa los 8 avisos de cada milisegundo (audio a 1 kHz). Por eso el PCM
+    // usa el timer de hardware del SoC (1 MHz / 125 cuentas); esp_timer sigue
+    // encargandose de las notas de tone().
+    static constexpr uint32_t kPcmSampleRate = 8000;
+    static constexpr uint32_t kPcmPeriodUs = 125;
+    static constexpr uint32_t kPcmCarrierHz = 31250;
+    static constexpr uint8_t kPcmResolution = 8;
+    // 42 % de 255: mismo tope de seguridad que la tabla de tonos (1720/4095).
+    static constexpr uint8_t kPcmMaxDuty = 107;
+    static constexpr uint8_t kPcmDefaultGain = 255;
+
 private:
     static int speakerPin;
     static bool audioEnabled;
@@ -80,8 +105,115 @@ private:
     static bool seqActive;
     static bool timerOk;
     static uint16_t multiBuf[kMultiBufWords];
+
+    // Estado compartido con la ISR del timer de hardware (o con SDL2 en el PC).
+    static const uint8_t* volatile pcmData;
+    static volatile uint32_t pcmLen;
+    static volatile uint32_t pcmPos;
+    static volatile bool pcmActive;
+    static volatile bool pcmLoop;
+    static volatile bool pcmPwmReady;
+    static volatile bool pcmTimerRunning;
+    static volatile uint8_t pcmGain;
 #if defined(ESP32)
     static esp_timer_handle_t noteTimer;
+    static hw_timer_t* pcmHwTimer;
+    static bool pcmHwAttached;
+#endif
+
+    // Amplitud efectiva 0..255 = volumen global (0..100 %) x ganancia PCM.
+    // La lee el callback en cada muestra, asi una bajada de volumen o la
+    // modulacion de la bola de golf se aplica sin reiniciar la muestra.
+    static uint8_t pcmAmplitude() {
+        const uint32_t pct = percentOfLevel(volumeLevel);
+        const uint32_t amp = (pct * 255UL) / 100UL;
+        return (uint8_t)((amp * pcmGain) / 255UL);
+    }
+
+    static void stopPcmTimer() {
+#if defined(ESP32)
+        if (pcmHwTimer != nullptr) {
+            timerStop(pcmHwTimer);
+        }
+        pcmTimerRunning = false;
+#endif
+    }
+
+    // Prepara el canal LEDC para PCM: 31.25 kHz / 8 bits y duty 0 (corte).
+    static void startPcmHardware() {
+#if defined(ESP32)
+        stopPcmTimer();
+        if (pcmPwmReady) {
+            ledcDetach((uint8_t)speakerPin);
+            pcmPwmReady = false;
+        }
+        pwmReady = false;
+        currentFreq = 0;
+        gpio_reset_pin((gpio_num_t)speakerPin);
+        gpio_set_direction((gpio_num_t)speakerPin, GPIO_MODE_OUTPUT);
+        gpio_pullup_dis((gpio_num_t)speakerPin);
+        gpio_pulldown_en((gpio_num_t)speakerPin);
+        gpio_set_level((gpio_num_t)speakerPin, 0);
+
+        if (!ledcAttach((uint8_t)speakerPin, kPcmCarrierHz, kPcmResolution)) {
+            pcmActive = false;
+            return;
+        }
+        pcmPwmReady = true;
+        ledcWrite((uint8_t)speakerPin, 0);
+
+        if (pcmHwTimer == nullptr) {
+            // 1 MHz -> 125 cuentas = 125 us exactos (8 kHz).
+            pcmHwTimer = timerBegin(1000000);
+        }
+        if (pcmHwTimer == nullptr) {
+            pcmActive = false;
+            pcmPwmReady = false;
+            ledcDetach((uint8_t)speakerPin);
+            gpio_set_level((gpio_num_t)speakerPin, 0);
+            return;
+        }
+        if (!pcmHwAttached) {
+            timerAttachInterrupt(pcmHwTimer, &ArduboyTones::pcmTimerCallback);
+            pcmHwAttached = true;
+        }
+        timerWrite(pcmHwTimer, 0);
+        timerAlarm(pcmHwTimer, kPcmPeriodUs, true, 0);
+        timerStart(pcmHwTimer);
+        pcmTimerRunning = true;
+#elif defined(PC_EMULATOR)
+        simAudioPcm(pcmData, pcmLen, pcmLoop);
+        simAudioPcmGain(pcmAmplitude());
+#endif
+    }
+
+#if defined(ESP32)
+    // 8 kHz exactos: un byte PCM -> un valor de duty. IRAM para que el
+    // streaming no dependa de la cache de Flash.
+    static void IRAM_ATTR pcmTimerCallback() {
+        if (!pcmActive) return;
+        if (!audioEnabled || volumeLevel == 0) {
+            ledcWrite((uint8_t)speakerPin, 0);
+            return;
+        }
+        if (pcmPos >= pcmLen) {
+            if (pcmLoop) {
+                pcmPos = 0;
+            } else {
+                pcmActive = false;
+                ledcWrite((uint8_t)speakerPin, 0);
+                gpio_set_level((gpio_num_t)speakerPin, 0);
+                return;
+            }
+        }
+        const uint32_t pos = pcmPos;
+        pcmPos = pos + 1;
+        const uint8_t sample = pcmData[pos];
+        // duty = muestra * tope_seguro * amplitud / (255 * 255)
+        const uint32_t duty =
+            ((uint32_t)sample * kPcmMaxDuty * pcmAmplitude()) / 65025UL;
+        ledcWrite((uint8_t)speakerPin, (uint8_t)duty);
+    }
 #endif
 
     static uint16_t dutyFor(uint8_t level, bool highVolume) {
@@ -312,12 +444,67 @@ public:
         if (vol > kVolumeSteps) vol = kVolumeSteps;
         volumeLevel = vol;
         if (volumeLevel == 0) {
+            stopPcm();
             silencePwm();
             return;
+        }
+        if (pcmActive) {
+#if defined(PC_EMULATOR)
+            simAudioPcmGain(pcmAmplitude());
+#endif
+            return; // el callback ESP32 lee el volumen en cada muestra
         }
         if (isTonePlaying && currentFreq > 0) {
             pwmTone(currentFreq, noteHighVolume);
         }
+    }
+
+    // --- API publica del motor PCM ---------------------------------------
+    // Reproduce `len` bytes unsigned 8-bit @ 8000 Hz. `loop` reinicia la
+    // muestra al llegar al final (para el rodar de la bola de golf).
+    static void playPcm(const uint8_t* data, uint32_t len, bool loop = false) {
+        if (speakerPin < 0 || data == nullptr || len == 0) return;
+        stopSequence(); // corta tonos y deja el pin en bajo
+        if (!audioEnabled || volumeLevel == 0) {
+            silencePwm();
+            return;
+        }
+        pcmData = data;
+        pcmLen = len;
+        pcmPos = 0;
+        pcmLoop = loop;
+        pcmGain = kPcmDefaultGain;
+        pcmActive = true;
+        startPcmHardware();
+    }
+
+    // Modula la amplitud (0..255) sin reiniciar: velocidad de la bola.
+    static void setPcmGain(uint8_t gain) {
+        pcmGain = gain;
+#if defined(PC_EMULATOR)
+        if (pcmActive) simAudioPcmGain(pcmAmplitude());
+#endif
+    }
+
+    static bool isPcmPlaying() { return pcmActive; }
+    static bool isPcmLooping() { return pcmActive && pcmLoop; }
+
+    // duty 0 y pin en bajo: el 2N2222 queda en corte total.
+    static void stopPcm() {
+        pcmActive = false;
+#if defined(ESP32)
+        stopPcmTimer();
+        if (speakerPin >= 0 && pcmPwmReady) {
+            ledcWrite((uint8_t)speakerPin, 0);
+            gpio_set_level((gpio_num_t)speakerPin, 0);
+            ledcDetach((uint8_t)speakerPin);
+            pcmPwmReady = false;
+            pwmReady = false;
+            currentFreq = 0;
+        }
+#elif defined(PC_EMULATOR)
+        simAudioPcmStop();
+#endif
     }
 
     static uint8_t getVolume() {
@@ -333,6 +520,7 @@ public:
 
     static void tone(uint16_t freq) {
         if (speakerPin < 0) return;
+        stopPcm();
         stopSequence();
         startNote(freq, 0, false);
     }
@@ -343,6 +531,7 @@ public:
             tone(freq);
             return;
         }
+        stopPcm();
         stopSequence();
         startNote(freq, dur, false);
     }
@@ -362,15 +551,18 @@ public:
     // Secuencia original (frecuencia, duracion) terminada en TONES_END /
     // TONES_REPEAT. Sirve para arrays en flash (PROGMEM) o const en RAM.
     static void tones(const uint16_t* tonesArray) {
+        stopPcm();
         startSequence(tonesArray);
     }
 
     static void tonesInRAM(uint16_t* tonesArray) {
+        stopPcm();
         startSequence((const uint16_t*)tonesArray);
     }
 
     // duty = 0 y pad en bajo: 2N2222 en corte, 0 mA en reposo.
     static void silenceHardware() {
+        stopPcm();
         stopSequence();
         silencePwm();
     }
@@ -381,6 +573,23 @@ public:
 
     // Respaldo de temporizacion cuando esp_timer no esta disponible.
     static void update() {
+#if defined(ESP32)
+        // El callback no puede detener su propio timer con seguridad: cuando
+        // una muestra termina (pcmActive = false), el bucle principal apaga
+        // aqui el periferico y deja el pin en bajo.
+        if (!pcmActive && pcmTimerRunning) {
+            stopPcmTimer();
+            if (pcmPwmReady) {
+                ledcWrite((uint8_t)speakerPin, 0);
+                gpio_set_level((gpio_num_t)speakerPin, 0);
+            }
+        }
+#elif defined(PC_EMULATOR)
+        // SDL2 avisa aqui de que la muestra no bucleada ya se consumio.
+        if (pcmActive && !pcmLoop && !simAudioPcmPlaying()) {
+            pcmActive = false;
+        }
+#endif
         if (timerOk) return;
         if (noteEndTime == 0) return;
         if ((int32_t)(millis() - noteEndTime) < 0) return;
@@ -412,6 +621,16 @@ inline const uint16_t* ArduboyTones::seqStart = nullptr;
 inline bool ArduboyTones::seqActive = false;
 inline bool ArduboyTones::timerOk = false;
 inline uint16_t ArduboyTones::multiBuf[ArduboyTones::kMultiBufWords] = {0};
+inline const uint8_t* volatile ArduboyTones::pcmData = nullptr;
+inline volatile uint32_t ArduboyTones::pcmLen = 0;
+inline volatile uint32_t ArduboyTones::pcmPos = 0;
+inline volatile bool ArduboyTones::pcmActive = false;
+inline volatile bool ArduboyTones::pcmLoop = false;
+inline volatile bool ArduboyTones::pcmPwmReady = false;
+inline volatile bool ArduboyTones::pcmTimerRunning = false;
+inline volatile uint8_t ArduboyTones::pcmGain = ArduboyTones::kPcmDefaultGain;
 #if defined(ESP32)
 inline esp_timer_handle_t ArduboyTones::noteTimer = nullptr;
+inline hw_timer_t* ArduboyTones::pcmHwTimer = nullptr;
+inline bool ArduboyTones::pcmHwAttached = false;
 #endif

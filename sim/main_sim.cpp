@@ -155,17 +155,64 @@ void simPresentFrame(const uint8_t *buffer, bool inverted) {
 }
 
 // =============================================================================
-// AUDIO: onda cuadrada mono en el dispositivo por defecto
+// AUDIO: onda cuadrada + PCM unsigned 8-bit @ 8000 Hz (SDL2, 44.1 kHz)
 // =============================================================================
 static std::atomic<uint16_t> gToneFreq(0);
+static std::atomic<const uint8_t *> gPcmData(nullptr);
+static std::atomic<uint32_t> gPcmLen(0);
+static std::atomic<bool> gPcmLoop(false);
+static std::atomic<bool> gPcmDone(true);
+static std::atomic<uint8_t> gPcmGain(255);
+static std::atomic<uint32_t> gPcmGeneration(0);
 
 static void audioCallback(void *, Uint8 *stream, int len) {
     Sint16 *out = reinterpret_cast<Sint16 *>(stream);
     const int samples = len / (int)sizeof(Sint16);
     static double phase = 0.0;
+    static double pcmPos = 0.0;
+    static uint32_t lastGeneration = 0;
     const uint16_t freq = gToneFreq.load(std::memory_order_relaxed);
+    const uint8_t *pcm = gPcmData.load(std::memory_order_relaxed);
+    const uint32_t pcmLen = gPcmLen.load(std::memory_order_relaxed);
+    const bool pcmLoop = gPcmLoop.load(std::memory_order_relaxed);
+    const uint8_t gain = gPcmGain.load(std::memory_order_relaxed);
+    const uint32_t generation = gPcmGeneration.load(std::memory_order_relaxed);
+
+    if (generation != lastGeneration) {
+        lastGeneration = generation;
+        pcmPos = 0.0;
+    }
 
     for (int i = 0; i < samples; i++) {
+        if (pcm != nullptr && pcmLen > 0 && !gPcmDone.load(std::memory_order_relaxed)) {
+            uint32_t idx = (uint32_t)pcmPos;
+            if (idx >= pcmLen) {
+                if (pcmLoop) {
+                    pcmPos -= pcmLen;
+                    idx = (uint32_t)pcmPos;
+                } else {
+                    gPcmDone.store(true, std::memory_order_relaxed);
+                    out[i] = 0;
+                    continue;
+                }
+            }
+            // Muestreo con interpolacion lineal 8 kHz -> 44.1 kHz.
+            const uint32_t nxt = (idx + 1 < pcmLen) ? idx + 1 : (pcmLoop ? 0 : idx);
+            const double frac = pcmPos - (double)idx;
+            const double s = pcm[idx] * (1.0 - frac) + pcm[nxt] * frac;
+            const int32_t centered = (int32_t)(s * 2.0) - 255;
+            out[i] = (Sint16)((centered * gain * 90) / (255 * 255));
+            pcmPos += 8000.0 / 44100.0;
+            if (pcmPos >= pcmLen) {
+                if (pcmLoop) pcmPos -= pcmLen;
+                else {
+                    gPcmDone.store(true, std::memory_order_relaxed);
+                    pcmPos = 0.0;
+                }
+            }
+            continue;
+        }
+
         if (freq < 20) {
             out[i] = 0;
             continue;
@@ -178,6 +225,27 @@ static void audioCallback(void *, Uint8 *stream, int len) {
 
 void simAudioTone(uint16_t freq) { gToneFreq.store(freq); }
 void simAudioOff() { gToneFreq.store(0); }
+
+void simAudioPcm(const uint8_t *data, uint32_t len, bool loop) {
+    gPcmData.store(data, std::memory_order_relaxed);
+    gPcmLen.store(len, std::memory_order_relaxed);
+    gPcmLoop.store(loop, std::memory_order_relaxed);
+    gPcmDone.store(false, std::memory_order_relaxed);
+    gPcmGeneration.fetch_add(1, std::memory_order_relaxed);
+}
+
+void simAudioPcmStop() {
+    gPcmData.store(nullptr, std::memory_order_relaxed);
+    gPcmLen.store(0, std::memory_order_relaxed);
+    gPcmDone.store(true, std::memory_order_relaxed);
+}
+
+void simAudioPcmGain(uint8_t gain) { gPcmGain.store(gain, std::memory_order_relaxed); }
+
+bool simAudioPcmPlaying() {
+    return gPcmData.load(std::memory_order_relaxed) != nullptr &&
+           !gPcmDone.load(std::memory_order_relaxed);
+}
 
 // =============================================================================
 // TECLADO -> BOTONES (mismo mapeo que la consola fisica)

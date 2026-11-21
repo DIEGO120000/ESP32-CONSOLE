@@ -443,6 +443,14 @@ SystemState currentState = STATE_MENU;
 SystemState previousStateBeforeSettings = STATE_MENU;
 int8_t settingsCursor = 0;
 int8_t menuCursor = 0;
+
+// Auto-repeticion de la cruceta en el menu principal: salto inmediato al
+// pulsar y, si se mantiene, 350 ms de espera inicial + un paso cada 110 ms.
+static constexpr uint32_t MENU_NAV_REPEAT_DELAY_MS = 350;
+static constexpr uint32_t MENU_NAV_REPEAT_RATE_MS = 110;
+static int8_t menuNavDir = 0;
+static uint32_t menuNavHoldStart = 0;
+static uint32_t menuNavLastRepeat = 0;
 // Registro del menu principal: una fila por juego. La numeracion visible se
 // calcula en el render (indice + 1), de modo que desactivar un port desde
 // include/games_config.h no deja numeros huecos ni desplaza la seleccion.
@@ -1698,26 +1706,52 @@ void loop() {
 
             // Bloquear lectura de controles en la misma trama de transición desde la pausa
             if (!wasPausedThisFrame) {
+                const uint32_t navNow = millis();
+                const int8_t heldDir = arduboy.pressed(UP_BUTTON) ? -1
+                                     : (arduboy.pressed(DOWN_BUTTON) ? +1 : 0);
+
                 // Navegación Vertical: EXCLUSIVAMENTE con la cruceta (UP y DOWN)
                 if (arduboy.justPressed(UP_BUTTON)) {
                     sound.tone(880, 15);
                     menuCursor = menuStepVisible((uint8_t)menuCursor, -1);
-                }
-                if (arduboy.justPressed(DOWN_BUTTON)) {
+                    menuNavDir = -1;
+                    menuNavHoldStart = navNow;
+                    menuNavLastRepeat = navNow;
+                } else if (arduboy.justPressed(DOWN_BUTTON)) {
                     sound.tone(700, 15);
                     menuCursor = menuStepVisible((uint8_t)menuCursor, +1);
+                    menuNavDir = +1;
+                    menuNavHoldStart = navNow;
+                    menuNavLastRepeat = navNow;
+                } else if (heldDir == 0) {
+                    menuNavDir = 0;
+                } else if (heldDir != menuNavDir) {
+                    // Se cambio de direccion sin soltar: reinicia la espera.
+                    menuNavDir = heldDir;
+                    menuNavHoldStart = navNow;
+                    menuNavLastRepeat = navNow;
+                } else if (navNow - menuNavHoldStart >= MENU_NAV_REPEAT_DELAY_MS &&
+                           navNow - menuNavLastRepeat >= MENU_NAV_REPEAT_RATE_MS) {
+                    // Auto-repeticion sostenida con el mismo clic de navegacion.
+                    sound.tone(heldDir < 0 ? 880 : 700, 15);
+                    menuCursor = menuStepVisible((uint8_t)menuCursor, heldDir);
+                    menuNavLastRepeat = navNow;
                 }
 
                 // Transición de deslizamiento horizontal hacia Ajustes al pulsar RIGHT
                 if (arduboy.justPressed(RIGHT_BUTTON)) {
+                    menuNavDir = 0;
                     transitionMenuToSettings();
                     break;
                 }
 
                 // Confirmación y lanzamiento al presionar Botón A (GPIO 3)
                 if (arduboy.justPressed(A_BUTTON)) {
+                    menuNavDir = 0;
                     launchSelectedGame();
                 }
+            } else {
+                menuNavDir = 0;
             }
             break;
         }

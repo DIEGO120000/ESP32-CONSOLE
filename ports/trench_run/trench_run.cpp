@@ -1,5 +1,6 @@
 #include "trench_run.h"
 #include "trench_run_assets.h"
+#include "sfx_pcm.h"
 
 // =============================================================================
 // TRENCH RUN - restauracion del original de Lucas Cardinali
@@ -117,7 +118,8 @@ void TrenchRunGame::advanceTies() {
         for (uint8_t i = 0; i < TRENCH_TIE_MAX_COUNT; i++) {
             if (tieAlive[i]) {
                 if (tieFrame[i] == TRENCH_TIE_FRAMES) {
-                    sound.tone(323, 5);
+                    // El TIE alcanza la nave: impacto y explosion reales.
+                    sound.playPcm(SFX_EXPLOSION, SFX_EXPLOSION_LEN);
                     tieAlive[i] = false;
                     shipShakeCounter = TRENCH_SHIP_SHAKE_COOLDOWN;
                     hull -= 1;
@@ -132,6 +134,7 @@ void TrenchRunGame::advanceTies() {
 void TrenchRunGame::checkDeath() {
     if (hull == 0) {
         lives--;
+        sound.playPcm(SFX_EXPLOSION, SFX_EXPLOSION_LEN);
         explosionBlinkCounter = TRENCH_EXPLOSION_BLINK_FRAMES;
         state = TR_STATE_DEATH;
     }
@@ -152,7 +155,7 @@ void TrenchRunGame::checkShoot() {
     }
 
     if (shooting) {
-        sound.tone(587, 5);
+        sound.playPcm(SFX_BLASTER, SFX_BLASTER_LEN);
 
         uint8_t crosshairXCenter = crosshairX + 5;
         uint8_t crosshairYCenter = crosshairY + 5;
@@ -178,6 +181,7 @@ void TrenchRunGame::checkShoot() {
                     crosshairYCenter >= tieYCollisionStart &&
                     crosshairYCenter <= tieYCollisionEnd) {
                     tieAlive[i] = false;
+                    sound.playPcm(SFX_EXPLOSION, SFX_EXPLOSION_LEN);
                     defeatedTies++;
                     tieExplosionCooldown[i] = TRENCH_EXPLOSION_COOLDOWN;
                 }
