@@ -236,6 +236,10 @@ bool updateGame(void)
             toDraw = true;
             dprintln("Resume");
         }
+        // Mantiene la escena congelada visible en el OLED de la consola:
+        // el bucle principal limpia el framebuffer cada frame, por lo que hay
+        // que redibujar la partida en pausa en cada frame.
+        toDraw = true;
         return false;
     }
 
@@ -290,13 +294,24 @@ bool updateGame(void)
 void drawGame(void)
 {
     if (toDraw) {
-        arduboy.clear();
+        // En pausa no se borra el framebuffer de la partida: se conserva y
+        // redibuja la escena congelada (el bucle principal ya limpia cada frame).
         if (state != STATE_PAUSE) {
-            drawChips();
-            drawFloors();
+            arduboy.clear();
         }
+        // La escena se redibuja tambien en pausa para que quede congelada.
+        drawChips();
+        drawFloors();
         drawPlayer();
         drawStrings();
+        if (state == STATE_PAUSE) {
+            // Recuadro negro con borde blanco, centrado, sobre la escena.
+            arduboy.fillRect(40, 24, 48, 16, BLACK);
+            arduboy.drawRect(40, 24, 48, 16, WHITE);
+            arduboy.setTextColor(WHITE);
+            arduboy.printEx(49, 28, F("PAUSE"));
+            arduboy.display();
+        }
         isBlink = !isBlink;
         toDraw = false;
     }
@@ -556,7 +571,7 @@ static void drawStrings(void)
                 arduboy.printEx(31, 46, F("NEW RECORD!"));
             }
         } else if (state == STATE_PAUSE) {
-            arduboy.printEx(49, 46, F("PAUSE"));
+            // El cartel PAUSE se dibuja como recuadro centrado en drawGame().
         }
 
     }
