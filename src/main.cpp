@@ -3,6 +3,8 @@
 #include <esp_sleep.h>
 #include <esp_system.h>
 #include <esp_heap_caps.h>
+#include <HWCDC.h>
+#include <stdarg.h>
 #include <Preferences.h>
 #include "driver/gpio.h"
 #include "soc/io_mux_reg.h"
@@ -1036,6 +1038,29 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
 // fault, OOB), un brownout (caida de tension del altavoz) o un watchdog
 // (bucle sin yield).
 // ---------------------------------------------------------------------------
+// Con ARDUINO_USB_CDC_ON_BOOT=0 "Serial" es la UART0 (GPIO 16/17): no sale
+// por el cable USB. El core deja siempre disponible el CDC del USB-Serial-JTAG
+// (/dev/ttyACM0), asi que el log de arranque se escribe en los dos sitios.
+#if !ARDUINO_USB_CDC_ON_BOOT
+// Con CDC_ON_BOOT=0 el core no crea el objeto global del CDC, pero el
+// periferico USB-Serial-JTAG es el mismo que enumera el host como /dev/ttyACM0.
+// Una sola instancia: no hay otra en el firmware.
+static HWCDC usbLog;
+#endif
+static bool usbLogReady = false;
+
+static void bootLog(const char* fmt, ...) {
+    char line[192];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    Serial.print(line);
+#if !ARDUINO_USB_CDC_ON_BOOT
+    if (usbLogReady) usbLog.print(line);
+#endif
+}
+
 static const char* resetReasonName(esp_reset_reason_t reason) {
     switch (reason) {
         case ESP_RST_UNKNOWN:   return "ESP_RST_UNKNOWN (sin datos)";
@@ -1049,19 +1074,24 @@ static const char* resetReasonName(esp_reset_reason_t reason) {
         case ESP_RST_DEEPSLEEP: return "ESP_RST_DEEPSLEEP (despertar de deep sleep)";
         case ESP_RST_BROWNOUT:  return "ESP_RST_BROWNOUT (caida de tension: altavoz/consumo)";
         case ESP_RST_SDIO:      return "ESP_RST_SDIO";
+        case ESP_RST_USB:       return "ESP_RST_USB (reset pedido por el host USB)";
+        case ESP_RST_JTAG:      return "ESP_RST_JTAG (reset por el depurador JTAG)";
+        case ESP_RST_EFUSE:     return "ESP_RST_EFUSE (error de eFuse)";
+        case ESP_RST_PWR_GLITCH:return "ESP_RST_PWR_GLITCH (glitch de alimentacion: revisar bateria/decoupling)";
+        case ESP_RST_CPU_LOCKUP:return "ESP_RST_CPU_LOCKUP (CPU bloqueada: doble excepcion/panic)";
         default:                return "ESP_RST_DESCONOCIDO";
     }
 }
 
 static void printLastResetReason() {
     const esp_reset_reason_t reason = esp_reset_reason();
-    Serial.printf("\n[RESET] ultimo reinicio: %d -> %s\n", (int)reason, resetReasonName(reason));
-    Serial.printf("[RESET] heap libre tras arrancar: %u bytes\n",
-                  (unsigned)esp_get_free_heap_size());
-    Serial.printf("[RESET] CPU: %d MHz, SDK: %s\n",
-                  (int)getCpuFrequencyMhz(), ESP.getSdkVersion());
+    bootLog("\n[RESET] ultimo reinicio: %d -> %s\n", (int)reason, resetReasonName(reason));
+    bootLog("[RESET] heap libre tras arrancar: %u bytes\n",
+            (unsigned)esp_get_free_heap_size());
+    bootLog("[RESET] CPU: %d MHz, SDK: %s\n",
+            (int)getCpuFrequencyMhz(), ESP.getSdkVersion());
     if (reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT) {
-        Serial.println("[RESET] Reinicio por software: revisar el backtrace del panic en UART0.");
+        bootLog("[RESET] Reinicio por software: buscar el backtrace del panic en el log de arranque.\n");
     }
 }
 
@@ -1121,6 +1151,14 @@ void setup() {
 
     Serial.begin(115200);
     delay(50);
+
+#if !ARDUINO_USB_CDC_ON_BOOT
+    // Habilita el USB-Serial-JTAG (/dev/ttyACM0) para que el log de reset se
+    // pueda leer con el monitor serie sin adaptador UART externo.
+    usbLog.begin(115200);
+    delay(120);
+    usbLogReady = true;
+#endif
 
     // Motivo del ultimo reinicio (panic / brownout / watchdog / power-on).
     printLastResetReason();
