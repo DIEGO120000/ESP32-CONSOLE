@@ -53,7 +53,16 @@ void initLogo(void)
 bool updateLogo(void)
 {
     counter--;
-    signalOn = (SIGNAL_PTN >> (counter - 15) / 3) & 1;
+    // (counter - 15) se vuelve negativo en los ultimos 15 frames y el shift
+    // negativo/>=32 es UB (en RISC-V el desplazamiento se enmascara a 5 bits y
+    // el logo parpadea con bits basura).
+    if (counter > 15) {
+        uint8_t sh = (uint8_t)((counter - 15) / 3);
+        if (sh > 31) sh = 31;
+        signalOn = (SIGNAL_PTN >> sh) & 1;
+    } else {
+        signalOn = false;
+    }
     arduboy.setRGBled(0, 0, signalOn * 127);
     bool ret = (counter == 0);
     if (ret) {

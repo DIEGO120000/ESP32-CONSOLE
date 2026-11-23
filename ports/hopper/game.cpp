@@ -29,6 +29,9 @@ enum {
 #define CHIPS           64
 #define CHIP_ZRANGE     1024
 
+// Tope duro del array de tipos de suelo por nivel (flrTypes[]).
+#define FLOOR_TYPES_MAX 4
+
 #define CENTER_X        64
 #define CENTER_Y        32
 #define PI              3.141592653589793
@@ -61,6 +64,7 @@ typedef struct
 /*  Local Functions  */
 
 static void initLevel(bool isStart);
+static void addFloorType(uint8_t type);
 static void movePlayer(void);
 static void springPlayer(FLOOR *pFloor, int diff);
 static void moveFloors(int scrollX, int scrollY, int scrollZ);
@@ -346,6 +350,15 @@ void drawGame(void)
 /*                             Control Functions                             */
 /*---------------------------------------------------------------------------*/
 
+// Registrar un tipo de suelo nunca puede salirse de flrTypes[4]. En AVR una
+// escritura de mas pasaba desapercibida; en ESP32-C6 es un Store access fault
+// que reinicia la consola al instante.
+static void addFloorType(uint8_t type)
+{
+    if (flrTypesNum >= FLOOR_TYPES_MAX) return;
+    flrTypes[flrTypesNum++] = type;
+}
+
 static void initLevel(bool isStart) {
     if (isStart) {
         state = STATE_START;
@@ -361,11 +374,11 @@ static void initLevel(bool isStart) {
     dprintln(level);
 
     flrTypesNum = 0;
-    if (level < 6) flrTypes[flrTypesNum++] = FLRTYPE_NORMAL;
-    if (level ==1) flrTypes[flrTypesNum++] = FLRTYPE_NORMAL;
-    if (level & 1) flrTypes[flrTypesNum++] = FLRTYPE_MOVE;
-    if (level & 2) flrTypes[flrTypesNum++] = FLRTYPE_VANISH;
-    if (level & 4 || level == 8) flrTypes[flrTypesNum++] = FLRTYPE_SMALL;
+    if (level < 6) addFloorType(FLRTYPE_NORMAL);
+    if (level ==1) addFloorType(FLRTYPE_NORMAL);
+    if (level & 1) addFloorType(FLRTYPE_MOVE);
+    if (level & 2) addFloorType(FLRTYPE_VANISH);
+    if (level & 4 || level == 8) addFloorType(FLRTYPE_SMALL);
 
     for (int i = 0; i < FLOORS_MANAGE; i++) {
         floorAry[i].type = FLRTYPE_NONE;
@@ -458,7 +471,11 @@ static void moveFloors(int scrollX, int scrollY, int scrollZ)
     int z = pFloor->z;
     if (state == STATE_GAME && z >= 0 && pFloor->type != FLRTYPE_GOAL) {
         uint8_t pos = pFloor->pos + 1;
-        uint8_t type = (pos == FLOORS_LEVEL) ? FLRTYPE_GOAL : flrTypes[random(flrTypesNum)];
+        // Indice acotado: un flrTypesNum corrupto no puede indexar fuera de rango.
+        uint8_t type = (pos == FLOORS_LEVEL) ? FLRTYPE_GOAL
+                     : (((flrTypesNum > 0) && (flrTypesNum <= FLOOR_TYPES_MAX))
+                            ? flrTypes[(uint8_t)(random(flrTypesNum) % flrTypesNum)]
+                            : FLRTYPE_NORMAL);
         floorIdxLast = nextFloorIdx(floorIdxLast);
         addFloor(type, pos, rand() * 2, rand() * 2, z - (512 + level * 32));
         dprint("floorIdxLast=");
@@ -524,9 +541,14 @@ static void moveChips(int scrollX, int scrollY, int scrollZ)
 
 static void drawPlayer(void)
 {
-    int8_t  x = playerX / 256 + CENTER_X - 4;
-    int8_t  y = playerY / 256 + CENTER_Y - 4;
-    uint8_t rotate = (playerRotate + 8) / 16 % 16;
+    int16_t x = playerX / 256 + CENTER_X - 4;
+    int16_t y = playerY / 256 + CENTER_Y - 4;
+    // Un jugador muy lejos del centro no debe desbordar el int16 de las
+    // coordenadas ni el indice del sprite de rotacion.
+    x = (int16_t)mid(-64, x, WIDTH + 64);
+    y = (int16_t)mid(-64, y, HEIGHT + 64);
+    uint8_t rotate = (uint8_t)(((playerRotate + 8) / 16) % 16);
+    if (rotate > 15) rotate = 15;
 
     if (isBlink) {
         for (int p = 0; p < 9; p++) {
@@ -541,15 +563,35 @@ static void drawPlayer(void)
 
 static void drawFloors(void)
 {
-    for (int i = 0; i < FLOORS_MANAGE; i++) {
-        FLOOR   *pFloor = &floorAry[(floorIdxFirst + i) % FLOORS_MANAGE];
+    for (uint8_t i = 0; i < FLOORS_MANAGE; i++) {
+        uint8_t idx = (uint8_t)((floorIdxFirst + i) % FLOORS_MANAGE);
+        FLOOR   *pFloor = &floorAry[idx];
         uint8_t type = pFloor->type;
-        if (pFloor->type == FLRTYPE_NONE) break;
+        if (type == FLRTYPE_NONE) break;
         if (pFloor->z < 0 || pFloor->size == 0) continue;
-        int16_t q = 256 + pFloor->z;
-        uint8_t s = pFloor->size * 256 / q;
-        int16_t x = pFloor->x / q + CENTER_X - s / 2;
-        int16_t y = pFloor->y / q + CENTER_Y - s / 2;
+
+        // q = 256 + z siempre es positivo (z >= 0), pero se comprueba igual:
+        // una division por cero/negativa es UB y aqui z lo puede corromper la
+        // acumulacion de scroll.
+        int32_t q = 256 + (int32_t)pFloor->z;
+        if (q <= 0) continue;
+
+        int32_t s32 = (int32_t)pFloor->size * 256 / q;
+        if (s32 < 1) s32 = 1;      // un suelo nunca colapsa a 0 px
+        if (s32 > 255) s32 = 255;  // cabe en el uint8 que esperan los helpers
+        uint8_t s = (uint8_t)s32;
+
+        // Coordenadas acotadas: pFloor->x/y acumulan scroll durante toda la
+        // partida y pueden salir del rango de int16.
+        int32_t px = (int32_t)pFloor->x / q + CENTER_X - s / 2;
+        int32_t py = (int32_t)pFloor->y / q + CENTER_Y - s / 2;
+        if (px < -512) px = -512;
+        if (px > 640)  px = 640;
+        if (py < -512) py = -512;
+        if (py > 640)  py = 640;
+        int16_t x = (int16_t)px;
+        int16_t y = (int16_t)py;
+
         if (pFloor == pFloorBlur) {
             int blur = (playerJump + 16) / 32;
             x += blur * random(-1, 2);
@@ -558,7 +600,12 @@ static void drawFloors(void)
         if (type == FLRTYPE_GOAL) {
             arduboy.fillRect2(x, y, s, s, (isBlink) ? WHITE : BLACK);
         } else {
-            fillPatternedRect(x, y, s, s, imgFloor[type - 1]);
+            // imgFloor[] tiene 4 patrones: el indice se acota para que un tipo
+            // corrupto no lea fuera de la tabla.
+            uint8_t ptn = (uint8_t)(type - 1);
+            if (ptn > 3) ptn = 0;
+            int8_t h = (int8_t)((s > HEIGHT) ? HEIGHT : s);
+            fillPatternedRect(x, y, s, h, imgFloor[ptn]);
         }
         arduboy.drawRect2(x, y, s, s, WHITE);
     }
@@ -566,15 +613,17 @@ static void drawFloors(void)
 
 static void drawChips(void)
 {
-    for (int i = 0; i < CHIPS; i++) {
+    for (uint8_t i = 0; i < CHIPS; i++) {
         CHIP *pChip = &chipAry[i];
-        int16_t q1 = 256 + (chipBaseZ + i * (CHIP_ZRANGE / CHIPS)) % CHIP_ZRANGE;
-        int16_t x1 = pChip->x / q1 + CENTER_X;
-        int16_t y1 = pChip->y / q1 + CENTER_Y;
-        int16_t q2 = q1 + abs(playerJump);
-        int16_t x2 = pChip->x / q2 + CENTER_X;
-        int16_t y2 = pChip->y / q2 + CENTER_Y;
-        arduboy.drawLine(x1, y1, x2, y2, WHITE);
+        int32_t q1 = 256 + ((int32_t)chipBaseZ + i * (CHIP_ZRANGE / CHIPS)) % CHIP_ZRANGE;
+        int32_t q2 = q1 + abs(playerJump);
+        if (q1 <= 0 || q2 <= 0) continue; // sin division por cero
+        int32_t x1 = (int32_t)pChip->x / q1 + CENTER_X;
+        int32_t y1 = (int32_t)pChip->y / q1 + CENTER_Y;
+        int32_t x2 = (int32_t)pChip->x / q2 + CENTER_X;
+        int32_t y2 = (int32_t)pChip->y / q2 + CENTER_Y;
+        arduboy.drawLine((int16_t)mid(-1024, x1, 2048), (int16_t)mid(-1024, y1, 2048),
+                         (int16_t)mid(-1024, x2, 2048), (int16_t)mid(-1024, y2, 2048), WHITE);
     }
 }
 
@@ -604,8 +653,13 @@ static void drawStrings(void)
 
 static int  drawFigure(int16_t x, int16_t y, int value, uint8_t align)
 {
+    // value % 10 con un valor negativo daria un indice negativo en imgFigures[].
+    if (value < 0) value = 0;
+    if (value > 99999) value = 99999; // 5 digitos: profundidad de recursion acotada
     int k = (value > 9) ? drawFigure(x - align * 4, y, value / 10, align) : 0;
-    arduboy.drawBitmap(x + k, y, imgFigures[value % 10], 8, 16, WHITE);
+    uint8_t digit = (uint8_t)(value % 10);
+    if (digit > 9) digit = 0;
+    arduboy.drawBitmap(x + k, y, imgFigures[digit], 8, 16, WHITE);
     return k + 8 - align * 4;
 }
 

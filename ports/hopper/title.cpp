@@ -26,6 +26,12 @@ enum {
 #define EEPROM_ADDR_BASE    800
 #define EEPROM_SIGNATURE    0x024E424FUL // "OBN\x02"
 
+// Tamano del almacen emulado (hopper_eeprom.h). El registro vive entre 800 y
+// ~850: muy por debajo del limite, pero eepSeek acota siempre para que ni una
+// direccion corrupta pueda salirse del buffer.
+#define HOPPER_EEPROM_SIZE      1024
+#define HOPPER_EEPROM_LAST_ADDR (HOPPER_EEPROM_SIZE - 8)
+
 /*  Typedefs  */
 
 typedef struct
@@ -231,6 +237,11 @@ uint8_t setLastScore(int score, uint32_t frames)
     while (r > 0 && (h = hiScore[r - 1]) < score) {
         if (--r < 9) hiScore[r + 1] = h;
     }
+    // r se mueve en [0,10] por construccion; se acota igualmente porque
+    // hiScore[] tiene 10 entradas y un indice fuera de rango es un Store access
+    // fault inmediato en el ESP32-C6.
+    if (r < 0) r = 0;
+    if (r > 10) r = 10;
     if (r < 10) hiScore[r] = score;
     playCount++;
     playFrames += frames;
@@ -462,7 +473,11 @@ static void drawTitleCredit(void)
 
 void eepSeek(int addr)
 {
-    eepAddr = max(addr, EEPROM_STORAGE_SPACE_START);
+    // Zona valida: desde el inicio reservado del core hasta el final del
+    // almacen emulado, dejando sitio al bloque mayor (dword + checksum).
+    if (addr < (int)EEPROM_STORAGE_SPACE_START) addr = (int)EEPROM_STORAGE_SPACE_START;
+    if (addr > (int)HOPPER_EEPROM_LAST_ADDR) addr = (int)HOPPER_EEPROM_LAST_ADDR;
+    eepAddr = (int16_t)addr;
 }
 
 uint8_t eepRead8(void)

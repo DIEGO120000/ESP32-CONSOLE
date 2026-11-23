@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <Preferences.h>
 #include "driver/gpio.h"
 #include "soc/io_mux_reg.h"
@@ -1027,6 +1029,42 @@ void enterDeepSleep(const char* message = "APAGANDO...") {
     esp_deep_sleep_start();
 }
 
+// ---------------------------------------------------------------------------
+// DIAGNOSTICO DE REINICIOS: imprime por Serial el motivo exacto del ultimo
+// arranque. Si la consola se reinicia sola en partida, la primera linea de
+// consola tras reconectar el USB dira si fue un panic (Store/Load access
+// fault, OOB), un brownout (caida de tension del altavoz) o un watchdog
+// (bucle sin yield).
+// ---------------------------------------------------------------------------
+static const char* resetReasonName(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_UNKNOWN:   return "ESP_RST_UNKNOWN (sin datos)";
+        case ESP_RST_POWERON:   return "ESP_RST_POWERON (encendido / reset de alimentacion)";
+        case ESP_RST_EXT:       return "ESP_RST_EXT (pin externo)";
+        case ESP_RST_SW:        return "ESP_RST_SW (reboot por software u OTA)";
+        case ESP_RST_PANIC:     return "ESP_RST_PANIC (panic/excepcion: Store-Load access fault, abort)";
+        case ESP_RST_INT_WDT:   return "ESP_RST_INT_WDT (watchdog de interrupciones)";
+        case ESP_RST_TASK_WDT:  return "ESP_RST_TASK_WDT (task watchdog: bucle sin yield)";
+        case ESP_RST_WDT:       return "ESP_RST_WDT (otro watchdog)";
+        case ESP_RST_DEEPSLEEP: return "ESP_RST_DEEPSLEEP (despertar de deep sleep)";
+        case ESP_RST_BROWNOUT:  return "ESP_RST_BROWNOUT (caida de tension: altavoz/consumo)";
+        case ESP_RST_SDIO:      return "ESP_RST_SDIO";
+        default:                return "ESP_RST_DESCONOCIDO";
+    }
+}
+
+static void printLastResetReason() {
+    const esp_reset_reason_t reason = esp_reset_reason();
+    Serial.printf("\n[RESET] ultimo reinicio: %d -> %s\n", (int)reason, resetReasonName(reason));
+    Serial.printf("[RESET] heap libre tras arrancar: %u bytes\n",
+                  (unsigned)esp_get_free_heap_size());
+    Serial.printf("[RESET] CPU: %d MHz, SDK: %s\n",
+                  (int)getCpuFrequencyMhz(), ESP.getSdkVersion());
+    if (reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT) {
+        Serial.println("[RESET] Reinicio por software: revisar el backtrace del panic en UART0.");
+    }
+}
+
 void setup() {
     // Altavoz magnetico en GPIO 1: PWM LEDC real (nota por frecuencia, volumen
     // por duty). Debe fijarse antes del pitido de encendido.
@@ -1083,6 +1121,9 @@ void setup() {
 
     Serial.begin(115200);
     delay(50);
+
+    // Motivo del ultimo reinicio (panic / brownout / watchdog / power-on).
+    printLastResetReason();
 
     // Boot Arduboy2 Core (inicializa bus I2C en SDA=7, SCL=6 y pantalla OLED)
     arduboy.begin();

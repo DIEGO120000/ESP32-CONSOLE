@@ -54,6 +54,10 @@ void update() {
     if (moduleTable[mode].updateFunc()) {
         pendingDone = true;
     }
+
+    // El despachador corre dentro del bucle principal de la consola: ceder el
+    // CPU cada frame evita que un frame largo dispare el Task Watchdog.
+    yield();
 }
 
 void draw() {

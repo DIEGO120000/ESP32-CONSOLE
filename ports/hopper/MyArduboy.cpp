@@ -82,8 +82,12 @@ void MyArduboy::myDrawChar(int16_t x, int16_t y, unsigned char c,
                            uint8_t color, uint8_t bg, uint8_t size) {
     bool draw_bg = bg != color;
 
+    // imgFont[] cubre solo ' '..'_' (64 glifos): cualquier otro caracter daria
+    // un indice negativo (load access fault) o fuera de la tabla.
+    if (size == 0) return;
+    if (c < ' ' || c > '_') c = '?';
     if (x >= WIDTH || y >= HEIGHT || x + 5 * size < 0 || y + 6 * size < 0) return;
-    uint32_t ptn = pgm_read_dword(imgFont + (c - ' '));
+    uint32_t ptn = pgm_read_dword(imgFont + (uint32_t)(c - ' '));
     if (size == 1) {
         for (int8_t i = 0; i < 6; i++) {
             for (int8_t j = 0; j < 6; j++) {
@@ -110,6 +114,7 @@ void MyArduboy::myDrawChar(int16_t x, int16_t y, unsigned char c,
 void MyArduboy::drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
                            int16_t w, int16_t h, uint8_t color) {
     // Formato Arduboy 1.1.1: columnas de 8 pixeles verticales.
+    if (bitmap == nullptr || w <= 0 || h <= 0) return;
     for (int16_t j = 0; j < h; j++) {
         for (int16_t i = 0; i < w; i++) {
             uint8_t column = pgm_read_byte(bitmap + (j / 8) * w + i);
@@ -121,6 +126,7 @@ void MyArduboy::drawBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
 }
 
 void MyArduboy::drawRect2(int16_t x, int16_t y, uint8_t w, int8_t h, uint8_t color) {
+    if (w == 0 || h == 0) return;
     drawFastHLine2(x, y, w, color);
     drawFastHLine2(x, y + h - 1, w, color);
     drawFastVLine2(x, y + 1, h - 2, color);
@@ -272,7 +278,11 @@ void HopperTune::update() {
 }
 
 void HopperTune::step() {
-    while (playing) {
+    // Una partitura corrupta (o un 0xD0/0xE0 sin nota detras) no puede dejar
+    // este while girando sin fin: el Task Watchdog reinicia la consola. Se
+    // limita el trabajo por llamada y se cede el CPU al salir.
+    uint8_t guard = 64;
+    while (playing && guard-- > 0) {
         uint8_t command = pgm_read_byte(cursor++);
 
         if (command < 0x80) {
@@ -318,6 +328,11 @@ void HopperTune::step() {
             return;
         }
     }
+    // Presupuesto agotado: se retoma en la siguiente llamada de update().
+    if (playing) {
+        waitUntil = millis() + 1;
+    }
+    yield();
 }
 
 } // namespace HopperGame
