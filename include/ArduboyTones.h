@@ -79,6 +79,12 @@ private:
     static const uint16_t* seqStart;
     static bool seqActive;
     static bool timerOk;
+    // La tarea de esp_timer NO recorre la partitura: solo marca que la nota
+    // actual vencio. Asi los punteros de secuencia los toca unicamente la
+    // tarea de loop(), sin carreras (antes un noTone() del loop podia poner
+    // seqPtr = nullptr mientras el callback lo incrementaba y el siguiente
+    // *seqPtr era una lectura en la direccion 0 -> panic -> reinicio).
+    static volatile bool noteDue;
     static uint16_t multiBuf[kMultiBufWords];
 #if defined(ESP32)
     static esp_timer_handle_t noteTimer;
@@ -137,6 +143,7 @@ private:
 #if defined(ESP32)
         if (noteTimer != nullptr) esp_timer_stop(noteTimer);
 #endif
+        noteDue = false;
     }
 
     // Un disparo por nota. Si esp_timer no esta disponible, update() hace de
@@ -155,6 +162,7 @@ private:
             }
         }
         timerOk = true;
+        noteDue = false;
         esp_timer_stop(noteTimer);
         esp_timer_start_once(noteTimer, (uint64_t)ms * 1000ULL);
 #else
@@ -190,25 +198,31 @@ private:
     }
 
     // Lee el siguiente par (frecuencia, duracion) del array original.
+    // Bucle con tope: una partitura que empiece por TONES_REPEAT ya no se
+    // recursa hasta desbordar la pila de la tarea.
     static void playNextNote() {
         if (!seqActive || seqPtr == nullptr) {
             silencePwm();
             return;
         }
-        const uint16_t word = *seqPtr++;
-        if (word == kToneEnd) {
-            stopSequence();
+        for (uint16_t guard = 0; guard < 64; guard++) {
+            const uint16_t word = *seqPtr++;
+            if (word == kToneEnd) {
+                stopSequence();
+                return;
+            }
+            if (word == kToneRepeat) {
+                seqPtr = seqStart;
+                continue;
+            }
+            const uint16_t dur = *seqPtr++;
+            // El bit 15 solo marca volumen alto: los Hz reales son los 15 bits bajos.
+            const bool highVolume = (word & kHighVolumeBit) != 0;
+            startNote(word & kFrequencyMask, dur, highVolume);
             return;
         }
-        if (word == kToneRepeat) {
-            seqPtr = seqStart;
-            playNextNote();
-            return;
-        }
-        const uint16_t dur = *seqPtr++;
-        // El bit 15 solo marca volumen alto: los Hz reales son los 15 bits bajos.
-        const bool highVolume = (word & kHighVolumeBit) != 0;
-        startNote(word & kFrequencyMask, dur, highVolume);
+        // Secuencia degenerada (solo repeticiones): se corta en lugar de girar.
+        stopSequence();
     }
 
     static void startSequence(const uint16_t* array) {
@@ -220,13 +234,9 @@ private:
         playNextNote();
     }
 
+    // Corre en la tarea de esp_timer: solo levanta una bandera.
     static void timerCallback(void*) {
-        if (seqActive) {
-            playNextNote();
-        } else {
-            silencePwm();
-            noteEndTime = 0;
-        }
+        noteDue = true;
     }
 
     // Rellena multiBuf con los tonos sueltos y lo reproduce como secuencia.
@@ -379,16 +389,20 @@ public:
         silenceHardware();
     }
 
-    // Respaldo de temporizacion cuando esp_timer no esta disponible.
+    // Unico punto que avanza la partitura: lo llama loop() en cada vuelta.
+    // Sirve tanto si el fin de nota lo marco esp_timer como si se calcula con
+    // millis() (PC_EMULATOR o si el timer no se pudo crear).
     static void update() {
-        if (timerOk) return;
-        if (noteEndTime == 0) return;
-        if ((int32_t)(millis() - noteEndTime) < 0) return;
+        if (!noteDue) {
+            if (noteEndTime == 0) return;
+            if ((int32_t)(millis() - noteEndTime) < 0) return;
+        }
+        noteDue = false;
+        noteEndTime = 0;
         if (seqActive) {
             playNextNote();
         } else {
             silencePwm();
-            noteEndTime = 0;
         }
     }
 
@@ -411,6 +425,7 @@ inline const uint16_t* ArduboyTones::seqPtr = nullptr;
 inline const uint16_t* ArduboyTones::seqStart = nullptr;
 inline bool ArduboyTones::seqActive = false;
 inline bool ArduboyTones::timerOk = false;
+inline volatile bool ArduboyTones::noteDue = false;
 inline uint16_t ArduboyTones::multiBuf[ArduboyTones::kMultiBufWords] = {0};
 #if defined(ESP32)
 inline esp_timer_handle_t ArduboyTones::noteTimer = nullptr;

@@ -1,4 +1,14 @@
 #include <Arduino.h>
+// Pila de la tarea de loop(): 32 KB en vez de los 8 KB por defecto. Con todos
+// los ports compilados en el mismo binario, una partida puede entrar en HALs
+// profundos (Hopper, Catacombs, 18 Holes) dentro de loop(); un desbordamiento
+// de pila alli es un panic inmediato sin mensaje. Debe ir antes de cualquier
+// uso de la macro, y [env:esp32c6_super_mini] pasa el mismo valor por
+// -DARDUINO_LOOP_STACK_SIZE.
+#ifndef ARDUINO_LOOP_STACK_SIZE
+#define ARDUINO_LOOP_STACK_SIZE 32768
+#endif
+SET_LOOP_TASK_STACK_SIZE(32 * 1024);
 #include <Wire.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -920,6 +930,29 @@ void returnToCurrentGameSubmenu() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LIMPIEZA DE ESTADO COMPARTIDO ENTRE CARTUCHOS
+// Un juego puede volver al menu por su propio exitRequested, por el combo
+// universal o por el menu de pausa. Sin un punto unico, una bandera de salida
+// o el cursor de pausa de la partida anterior sobrevivia al siguiente juego
+// (por ejemplo, salir de Hopper con B dejaba hopperExitArmed armado).
+// ---------------------------------------------------------------------------
+void resetSharedRuntimeState() {
+    gamePaused = false;
+    pauseMenuCursor = 0;
+    exitComboStart = 0;
+    menuNavDir = 0;
+    menuNavHoldStart = 0;
+    menuNavLastRepeat = 0;
+#ifdef ENABLE_GAME_HOPPER
+    hopperExitStart = 0;
+    hopperExitArmed = false;
+#endif
+    melodyPlayer.stop();
+    sound.noTone();
+    Arduboy2Core::previousButtonState = Arduboy2Core::currentButtonState;
+}
+
 void exitCurrentGameToMainMenu() {
 #ifdef ENABLE_PING_PONG
     if (currentState == STATE_PING_PONG) {
@@ -966,12 +999,8 @@ void exitCurrentGameToMainMenu() {
     // Un cartucho pudo silenciarse a si mismo con arduboy.audio.off(): el
     // nucleo y sus menus siempre vuelven al menu con audio habilitado.
     ArduboyTones::enableAudio(true);
-    melodyPlayer.stop();
-    sound.noTone();
+    resetSharedRuntimeState();
     sound.tone(600, 30);
-    gamePaused = false;
-    pauseMenuCursor = 0;
-    Arduboy2Core::previousButtonState = Arduboy2Core::currentButtonState;
     currentState = STATE_MENU;
 }
 
@@ -1095,6 +1124,66 @@ static void printLastResetReason() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// CARTEL DE REINICIO EN EL OLED: si el arranque no fue normal, se muestra
+// durante 2 s el codigo exacto (PANIC / WDT / BROWNOUT...) antes de cargar el
+// menu. Asi el fallo se identifica con solo mirar la pantalla, sin cable.
+// ---------------------------------------------------------------------------
+static const uint32_t RESET_BANNER_MS = 2000;
+
+// Arranques normales en esta consola: encendido, reboot por software/OTA y
+// despertar del deep sleep (que es su propio boton de apagado). UNKNOWN se
+// trata tambien como normal para no avisar en cada arranque en frio del USB.
+static bool isNormalBootReason(esp_reset_reason_t reason) {
+    return reason == ESP_RST_POWERON || reason == ESP_RST_SW ||
+           reason == ESP_RST_DEEPSLEEP || reason == ESP_RST_UNKNOWN;
+}
+
+static const char* resetBannerCode(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_PANIC:      return "PANIC";
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_INT_WDT:
+        case ESP_RST_WDT:        return "WDT";
+        case ESP_RST_BROWNOUT:
+        case ESP_RST_PWR_GLITCH: return "BROWNOUT";
+        case ESP_RST_CPU_LOCKUP: return "CPU LOCKUP";
+        case ESP_RST_EXT:        return "EXT PIN";
+        case ESP_RST_USB:        return "USB";
+        case ESP_RST_JTAG:       return "JTAG";
+        case ESP_RST_EFUSE:      return "EFUSE";
+        case ESP_RST_SDIO:       return "SDIO";
+        default:                 return "DESCONOCIDO";
+    }
+}
+
+static void showResetBannerIfAbnormal() {
+    const esp_reset_reason_t reason = esp_reset_reason();
+    if (isNormalBootReason(reason)) return;
+
+    char title[28];
+    snprintf(title, sizeof(title), "SYS RESET: %s", resetBannerCode(reason));
+
+    arduboy.clear();
+    arduboy.fillRect(0, 10, 128, 11, WHITE);
+    arduboy.setTextColor(BLACK);
+    arduboy.setCursor(2, 12);
+    arduboy.print(title);
+
+    arduboy.setTextColor(WHITE);
+    arduboy.setCursor(2, 26);
+    arduboy.print("Reinicio inesperado");
+    arduboy.setCursor(2, 37);
+    arduboy.printf("codigo: %d", (int)reason);
+    arduboy.setCursor(2, 47);
+    arduboy.printf("heap: %u B", (unsigned)esp_get_free_heap_size());
+    arduboy.display();
+
+    delay(RESET_BANNER_MS);
+    arduboy.clear();
+    arduboy.display();
+}
+
 void setup() {
     // Altavoz magnetico en GPIO 1: PWM LEDC real (nota por frecuencia, volumen
     // por duty). Debe fijarse antes del pitido de encendido.
@@ -1166,6 +1255,10 @@ void setup() {
     // Boot Arduboy2 Core (inicializa bus I2C en SDA=7, SCL=6 y pantalla OLED)
     arduboy.begin();
     arduboy.setFrameRate(60);
+
+    // Con la pantalla ya viva: si el arranque anterior termino en panic,
+    // watchdog o brownout, se ve el motivo 2 s antes del menu.
+    showResetBannerIfAbnormal();
 
     // Asegurar configuración limpia y aislamiento de todos los pines de control
     Arduboy2Core::initPins();
@@ -2345,4 +2438,13 @@ void loop() {
     if (consoleAdmin.isUpdating()) consoleAdmin.drawOverlay();
 
     arduboy.display();
+
+    // Red de seguridad: cualquier vuelta al menu (exitRequested de un port,
+    // combo, pausa) deja el estado compartido limpio, aunque el camino no
+    // llame a exitCurrentGameToMainMenu().
+    static SystemState lastRenderedState = STATE_MENU;
+    if (currentState == STATE_MENU && lastRenderedState != STATE_MENU) {
+        resetSharedRuntimeState();
+    }
+    lastRenderedState = currentState;
 }
