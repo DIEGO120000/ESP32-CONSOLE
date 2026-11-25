@@ -23,6 +23,10 @@ struct PingPongGame {
     float ballSpeed;
     uint8_t s1, s2;
     uint16_t highScore; // Normal Mode High Score (EEPROM addr 14)
+    // Record nuevo en RAM pendiente de volcar a EEPROM. El commit de 1 KB
+    // (Preferences::putBytes) bloquea la flash y es un pico de corriente que
+    // puede tumbar el regulador: nunca se escribe en mitad de partida.
+    bool scoreDirty;
     uint8_t rallyCount;
     bool gameOver;
     bool victory;
@@ -43,6 +47,7 @@ struct PingPongGame {
     unsigned long lobbyWarnUntil; // Aviso breve: falta un jugador en el lobby
 
     void init() {
+        flushScores(); // record pendiente a flash con el juego ya parado
         melodyPlayer.stop();
         if (wifiGamepads.isRunning) {
             wifiGamepads.stop();
@@ -51,6 +56,20 @@ struct PingPongGame {
         submenuCursor = 0;
         submenuEnterTime = millis();
         exitRequested = false;
+        scoreDirty = false;
+    }
+
+    // Vuelca a EEPROM el record pendiente. Solo se llama en Game Over o al
+    // salir al menu, nunca dentro del bucle activo: cada EEPROM.put() arrastra
+    // un commit sincrono de los 1024 B completos de la NVS a la flash.
+    void flushScores() {
+        if (!scoreDirty) return;
+        if (mode == PP_MODE_NORMAL) {
+            EEPROM.put(14, highScore);
+        } else if (mode == PP_MODE_DODGE) {
+            EEPROM.put(24, highScoreDodge);
+        }
+        scoreDirty = false;
     }
 
     void initNormal() {
@@ -293,6 +312,7 @@ struct PingPongGame {
             s2++;
             if (s2 >= 5) {
                 gameOver = true;
+                flushScores(); // fin de partida: unico punto de escritura
                 triggerRgbLed(255, 0, 0, 1000); // Exclusively RED on defeat vs CPU
                 melodyPlayer.play(pingPongDefeatNotes, 4);
             } else {
@@ -301,9 +321,10 @@ struct PingPongGame {
             }
         } else if (bx > 132.0f) {
             s1++;
-            if (s1 > highScore) { highScore = s1; EEPROM.put(14, highScore); }
+            if (s1 > highScore) { highScore = s1; scoreDirty = true; } // RAM; flush al final
             if (s1 >= 5) {
                 victory = true;
+                flushScores(); // fin de partida: unico punto de escritura
                 triggerRgbLed(0, 255, 0, 1000); // GREEN on player victory
                 melodyPlayer.play(pingPongVictoryNotes, 4);
             } else {
@@ -399,10 +420,11 @@ struct PingPongGame {
 
             if (dodgeScore > highScoreDodge) {
                 highScoreDodge = dodgeScore;
-                EEPROM.put(24, highScoreDodge);
+                scoreDirty = true;
                 isNewRecord = true;
                 triggerRgbLed(0, 255, 0, 1000); // 1s Green LED on personal record
                 melodyPlayer.play(pingPongVictoryNotes, 4);
+                flushScores(); // Game Over: se persiste aqui, no durante la partida
             }
             return;
         }

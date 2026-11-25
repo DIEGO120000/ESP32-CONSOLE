@@ -42,6 +42,9 @@ uint8_t setLastScore(int score, uint32_t time);
 void initGame(void);
 bool updateGame(void);
 void drawGame(void);
+// true cuando la partida ya termino (pantalla de Game Over): unico momento en
+// que el despachador permite confirmar el record en flash.
+bool isGameOver(void);
 
 /*  Global Variables  */
 

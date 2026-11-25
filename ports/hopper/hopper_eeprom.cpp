@@ -33,10 +33,20 @@ void HopperEepromStore::write(int addr, uint8_t value) {
     lastWrite = millis();
 }
 
+void HopperEepromStore::setCommitAllowed(bool allowed) {
+    commitAllowed = allowed;
+}
+
 void HopperEepromStore::poll() {
-    if (dirty && (millis() - lastWrite) >= 250) {
-        commit();
-    }
+    // En partida activa el record se queda en RAM: ni siquiera los 250 ms de
+    // agrupacion llegan a la flash hasta el Game Over o la salida al menu.
+    if (!dirty || !commitAllowed) return;
+    if ((millis() - lastWrite) < 250) return;
+    commit();
+}
+
+void HopperEepromStore::flush() {
+    if (dirty) commit();
 }
 
 void HopperEepromStore::commit() {

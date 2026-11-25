@@ -41,12 +41,18 @@ void update() {
     // Latch propio de botones y avance de la melodia en curso.
     arduboy.latchButtons();
     arduboy.tunes.update();
+
+    // Solo se permite tocar la flash fuera de la partida activa: el commit de
+    // 1 KB a NVS hunde la alimentacion justo cuando el jugador esta saltando.
+    const bool activePlay = (mode == GAME_MODE) && !isGameOver();
+    hopperEeprom.setCommitAllowed(!activePlay);
     hopperEeprom.poll();
 
     // El cambio de modo ocurre despues de mostrar el ultimo frame del modo
     // anterior, igual que en el loop() original.
     if (pendingDone) {
         pendingDone = false;
+        hopperEeprom.flush();
         mode = (mode == TITLE_MODE) ? GAME_MODE : TITLE_MODE;
         moduleTable[mode].initFunc();
     }
@@ -72,6 +78,7 @@ void loop() {
 } // namespace HopperGame
 
 void HopperPort::init() {
+    HopperGame::hopperEeprom.flush(); // record pendiente de la sesion anterior
     exitRequested = false;
     HopperGame::exitRequested = false;
     HopperGame::setup();
@@ -80,6 +87,7 @@ void HopperPort::init() {
 void HopperPort::update() {
     HopperGame::update();
     if (HopperGame::exitRequested) {
+        HopperGame::hopperEeprom.flush(); // salida al menu: momento seguro para la flash
         exitRequested = true;
         HopperGame::exitRequested = false;
     }

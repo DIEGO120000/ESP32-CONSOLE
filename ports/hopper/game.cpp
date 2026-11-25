@@ -318,6 +318,11 @@ bool updateGame(void)
     return (state == STATE_OVER && counter == 0);
 }
 
+bool isGameOver(void)
+{
+    return state == STATE_OVER;
+}
+
 void drawGame(void)
 {
     if (toDraw) {

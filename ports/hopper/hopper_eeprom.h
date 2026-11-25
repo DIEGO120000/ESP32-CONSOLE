@@ -13,6 +13,11 @@
 //
 // Las escrituras se agrupan: el juego escribe ~20 bytes al terminar partida y
 // se confirman 250 ms despues, no en cada byte.
+//
+// El commit real (putBytes de 1 KB a NVS) se aplaza ademas hasta que la
+// partida activa termina: escribir la flash durante el juego es un pico de
+// corriente que puede tumbar el regulador. setCommitAllowed(false) mantiene el
+// record solo en RAM; flush() lo fuerza en los cambios de pantalla.
 // =============================================================================
 namespace HopperGame {
 
@@ -21,6 +26,10 @@ public:
     uint8_t read(int addr);
     void write(int addr, uint8_t value);
     void poll();
+    // Habilita/deshabilita el volcado a flash de poll().
+    void setCommitAllowed(bool allowed);
+    // Confirma en flash lo pendiente, sin esperar los 250 ms.
+    void flush();
 
 private:
     void ensureLoaded();
@@ -29,6 +38,7 @@ private:
     uint8_t buffer[1024];
     bool loaded = false;
     bool dirty = false;
+    bool commitAllowed = true;
     uint32_t lastWrite = 0;
 };
 
