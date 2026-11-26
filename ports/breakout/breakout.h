@@ -7,15 +7,21 @@
 extern const uint8_t arkanoid_levels[15][8][11];
 
 struct BreakoutGame {
+    // Mapa unico y fijo tipo <-> letra. Cada poder real tiene UNA sola letra y
+    // esa letra nunca otorga otro poder durante la partida:
+    //   E = Expand (pala ancha)   L = Laser       M = Multi-ball (disrupt)
+    //   C = Catch  (pegajosa)     S = Slow        B = Break (portal warp)
+    //   P = Extra life (o puntos) 
     enum PowerUpType {
         PWR_NONE = 0,
         PWR_EXPAND,    // [E]
         PWR_LASER,     // [L]
-        PWR_DISRUPT,   // [D]
+        PWR_DISRUPT,   // [M]
         PWR_CATCH,     // [C]
         PWR_SLOW,      // [S]
         PWR_BREAK,     // [B]
-        PWR_EXTRA_LIFE // [P]
+        PWR_EXTRA_LIFE,// [P]
+        PWR_COUNT      // Centinela: PWR_NONE + 7 poderes reales
     };
 
     struct Ball {
@@ -157,9 +163,15 @@ struct BreakoutGame {
                     capsules[i].active = true;
                     capsules[i].x = bx + 1.0f;
                     capsules[i].y = by;
-                    // Random Power-Up Type: E, L, D, C, S, B, P
-                    static const uint8_t types[] = { PWR_EXPAND, PWR_LASER, PWR_DISRUPT, PWR_CATCH, PWR_SLOW, PWR_BREAK, PWR_EXTRA_LIFE };
-                    capsules[i].type = types[random(0, 7)];
+                    // Tabla unica de poderes REALES: sin PWR_NONE ni huecos.
+                    // sizeof(types) == PWR_COUNT - 1 y random(0, N) devuelve
+                    // [0, N), asi que el 100% de los indices caen dentro de la
+                    // tabla y cada valor es un poder que aplica efecto.
+                    static const uint8_t types[PWR_COUNT - 1] = {
+                        PWR_EXPAND, PWR_LASER, PWR_DISRUPT, PWR_CATCH,
+                        PWR_SLOW, PWR_BREAK, PWR_EXTRA_LIFE
+                    };
+                    capsules[i].type = types[random(0, (long)(sizeof(types)))];
                     break;
                 }
             }
@@ -167,57 +179,85 @@ struct BreakoutGame {
     }
 
     void applyPowerUp(uint8_t type) {
+        // Un tipo vacio (PWR_NONE) o fuera de rango no puede borrar el poder
+        // activo ni consumirse como capsula fantasma: se ignora por completo.
+        if (type <= PWR_NONE || type >= PWR_COUNT) return;
+
+        // Extra life es acumulativa: no reemplaza el modificador activo y, si
+        // la partida ya esta al tope de vidas, nunca queda como capsula vacia.
         if (type == PWR_EXTRA_LIFE) {
             if (lives < 5) lives++;
+            else score += 500;
             sound.tone(1200, 40); delay(40); sound.tone(1800, 90);
             return;
         }
 
-        // Exclusive switch for modifiers
+        // Poderes exclusivos: uno reemplaza al anterior.
         activePowerUp = type;
 
-        // Reset previous special states
-        if (type != PWR_EXPAND) paddleWidth = 18.0f;
-        if (type != PWR_BREAK) warpGateOpen = false;
+        // La pala vuelve a su ancho base salvo EXPAND; el portal se cierra
+        // salvo BREAK.
+        paddleWidth = 18.0f;
+        warpGateOpen = false;
 
-        if (type == PWR_EXPAND) {
-            paddleWidth = 28.0f;
-            if (paddleX + paddleWidth > 126.0f) paddleX = 126.0f - paddleWidth;
-            sound.tone(1100, 50);
-        } else if (type == PWR_LASER) {
-            lastLaserAutoFire = millis();
-            sound.tone(1500, 50);
-        } else if (type == PWR_DISRUPT) {
-            // Find first active ball to replicate
-            int8_t mainBall = -1;
-            for (uint8_t b = 0; b < 3; b++) {
-                if (balls[b].active) { mainBall = b; break; }
-            }
-            if (mainBall != -1) {
-                float bx = balls[mainBall].x;
-                float by = balls[mainBall].y;
+        switch (type) {
+            case PWR_EXPAND:
+                paddleWidth = 28.0f;
+                if (paddleX + paddleWidth > 126.0f) paddleX = 126.0f - paddleWidth;
+                sound.tone(1100, 50);
+                break;
+
+            case PWR_LASER:
+                lastLaserAutoFire = millis();
+                sound.tone(1500, 50);
+                break;
+
+            case PWR_DISRUPT: {
+                // Multi-ball: replica la primera bola activa (o la pala si no
+                // hubiera ninguna) para que el poder nunca quede sin efecto.
+                int8_t mainBall = -1;
+                for (uint8_t b = 0; b < 3; b++) {
+                    if (balls[b].active) { mainBall = b; break; }
+                }
+                float bx = (mainBall >= 0) ? balls[mainBall].x : (paddleX + paddleWidth / 2.0f);
+                float by = (mainBall >= 0) ? balls[mainBall].y : 54.0f;
                 balls[0].active = true; balls[0].x = bx; balls[0].y = by; balls[0].vx = -1.1f; balls[0].vy = -1.3f; balls[0].stuck = false; balls[0].bounceCount = 0;
                 balls[1].active = true; balls[1].x = bx; balls[1].y = by; balls[1].vx = 0.4f;  balls[1].vy = -1.6f; balls[1].stuck = false; balls[1].bounceCount = 0;
                 balls[2].active = true; balls[2].x = bx; balls[2].y = by; balls[2].vx = 1.3f;  balls[2].vy = -1.1f; balls[2].stuck = false; balls[2].bounceCount = 0;
                 sound.tone(1300, 40); delay(40); sound.tone(1600, 60);
+                break;
             }
-        } else if (type == PWR_CATCH) {
-            sound.tone(950, 50);
-        } else if (type == PWR_SLOW) {
-            ballSpeed = 1.4f;
-            for (uint8_t b = 0; b < 3; b++) {
-                if (balls[b].active && !balls[b].stuck) {
-                    float currentMag = sqrt(balls[b].vx * balls[b].vx + balls[b].vy * balls[b].vy);
-                    if (currentMag > 0.1f) {
-                        balls[b].vx = (balls[b].vx / currentMag) * ballSpeed;
-                        balls[b].vy = (balls[b].vy / currentMag) * ballSpeed;
+
+            case PWR_CATCH:
+                sound.tone(950, 50);
+                break;
+
+            case PWR_SLOW:
+                // Siempre frena de verdad: con ballSpeed ya en 1.4 (su base) el
+                // reset anterior no hacia nada y borraba el poder anterior.
+                ballSpeed = min(1.4f, ballSpeed * 0.75f);
+                if (ballSpeed < 0.9f) ballSpeed = 0.9f;
+                for (uint8_t b = 0; b < 3; b++) {
+                    if (balls[b].active && !balls[b].stuck) {
+                        float currentMag = sqrt(balls[b].vx * balls[b].vx + balls[b].vy * balls[b].vy);
+                        if (currentMag > 0.1f) {
+                            balls[b].vx = (balls[b].vx / currentMag) * ballSpeed;
+                            balls[b].vy = (balls[b].vy / currentMag) * ballSpeed;
+                        }
                     }
                 }
-            }
-            sound.tone(600, 80);
-        } else if (type == PWR_BREAK) {
-            warpGateOpen = true;
-            sound.tone(1400, 50); delay(40); sound.tone(1800, 70);
+                sound.tone(600, 80);
+                break;
+
+            case PWR_BREAK:
+                warpGateOpen = true;
+                sound.tone(1400, 50); delay(40); sound.tone(1800, 70);
+                break;
+
+            default:
+                // Inalcanzable: el rango ya se valido arriba.
+                activePowerUp = PWR_NONE;
+                break;
         }
     }
 
@@ -571,19 +611,21 @@ struct BreakoutGame {
         arduboy.drawPixel(ix, iy + 4, BLACK);
         arduboy.drawPixel(ix + 6, iy + 4, BLACK);
 
-        // 3x5 Mini font table: {E, L, D, C, S, B, P}
-        static const uint8_t PROGMEM miniLetters[8][5] = {
-            {0, 0, 0, 0, 0}, // None
-            {7, 4, 6, 4, 7}, // E (Expand)
-            {4, 4, 4, 4, 7}, // L (Laser)
-            {6, 5, 5, 5, 6}, // D (Disrupt / Multi-ball)
-            {3, 4, 4, 4, 3}, // C (Catch)
-            {3, 4, 2, 1, 6}, // S (Slow)
-            {6, 5, 6, 5, 6}, // B (Break / Warp)
-            {6, 5, 6, 4, 4}  // P (Extra Life)
+        // Glifos 3x5 indexados DIRECTAMENTE por PowerUpType: la letra dibujada
+        // sale del tipo real de la capsula, sin tablas paralelas que se puedan
+        // desincronizar. Una letra = un poder, siempre.
+        static const uint8_t PROGMEM miniLetters[PWR_COUNT][5] = {
+            {0, 0, 0, 0, 0}, // PWR_NONE (sin capsula)
+            {7, 4, 6, 4, 7}, // [E] Expand    - pala ancha
+            {4, 4, 4, 4, 7}, // [L] Laser     - disparos
+            {5, 7, 7, 5, 5}, // [M] Multi-ball - disrupt
+            {7, 4, 4, 4, 7}, // [C] Catch     - pegajosa
+            {7, 4, 7, 1, 7}, // [S] Slow      - lenta
+            {6, 5, 6, 5, 6}, // [B] Break     - portal warp
+            {6, 5, 6, 4, 4}  // [P] Extra life - o puntos
         };
 
-        if (type >= 1 && type <= 7) {
+        if (type > PWR_NONE && type < PWR_COUNT) {
             for (int8_t r = 0; r < 5; r++) {
                 uint8_t rowBits = pgm_read_byte(&miniLetters[type][r]);
                 for (int8_t c = 0; c < 3; c++) {
@@ -595,14 +637,16 @@ struct BreakoutGame {
         }
     }
 
+    // Misma tabla 1 a 1 que drawCapsule(): E/L/M/C/S/B/P.
     char getPowerUpChar(uint8_t type) {
         switch (type) {
             case PWR_EXPAND: return 'E';
             case PWR_LASER: return 'L';
-            case PWR_DISRUPT: return 'D';
+            case PWR_DISRUPT: return 'M';
             case PWR_CATCH: return 'C';
             case PWR_SLOW: return 'S';
             case PWR_BREAK: return 'B';
+            case PWR_EXTRA_LIFE: return 'P';
             default: return ' ';
         }
     }
